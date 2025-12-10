@@ -11,6 +11,7 @@
         <a href="/ssh/alerts" class="tab">Alertas SSH</a>
         <a href="/ssh/sudo" class="tab">Sudo (actividad)</a>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
+        <a href="/ssh/criticality" class="tab">Criticidad</a>
       </div>
     </header>
 

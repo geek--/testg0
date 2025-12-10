@@ -12,6 +12,7 @@
         <a href="/ssh/alerts" class="tab">Alertas SSH</a>
         <span class="tab tab-active">Sudo (actividad)</span>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
+        <a href="/ssh/criticality" class="tab">Criticidad</a>
       </div>
     </header>
 
@@ -177,6 +178,7 @@
                 <tr>
                   <th>Fecha/Hora</th>
                   <th>Host</th>
+                  <th>IP</th>
                   <th>sudo_user</th>
                   <th>target_user</th>
                   <th>Comando</th>
@@ -191,6 +193,7 @@
                 >
                   <td>{{ formatTs(e.ts || e.timestamp || e.time || "") }}</td>
                   <td>{{ e.hostname || e.host || "-" }}</td>
+                  <td>{{ e.remote_ip || e.ip || e.source_ip || "-" }}</td>
                   <td>{{ e.sudo_user || e.username || e.user || "-" }}</td>
                   <td>{{ e.target_user || "-" }}</td>
                   <td>{{ e.command || e.cmd || e.binary || "-" }}</td>

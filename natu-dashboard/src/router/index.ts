@@ -7,6 +7,7 @@ import SSHActivityView from "../modules/ssh/views/SSHActivityView.vue";
 import SSHAlertsView from "../modules/ssh/views/SSHAlertsView.vue";
 import SudoOverviewView from "../modules/ssh/views/SudoOverviewView.vue";
 import SudoAlertsView from "../modules/ssh/views/SudoAlertsView.vue";
+import SecurityCriticalityView from "../modules/ssh/views/SecurityCriticalityView.vue";
 
 const routes: RouteRecordRaw[] = [
   {
@@ -37,6 +38,11 @@ const routes: RouteRecordRaw[] = [
     path: "/ssh/sudo-alerts",
     name: "sudo-alerts",
     component: SudoAlertsView,
+  },
+  {
+    path: "/ssh/criticality",
+    name: "security-criticality",
+    component: SecurityCriticalityView,
   },
 ];
 

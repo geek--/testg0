@@ -72,11 +72,15 @@ type SSHAlert struct {
 	CreatedAt     time.Time `json:"created_at"`
 	Hostname      string    `json:"hostname"`
 	RemoteIP      string    `json:"remote_ip"`
+	Username      string    `json:"username,omitempty"`
 	FailedCount   int       `json:"failed_count"`
 	WindowMinutes int       `json:"window_minutes"`
 	FirstSeen     time.Time `json:"first_seen"`
 	LastSeen      time.Time `json:"last_seen"`
 	Status        string    `json:"status"`
+	Rule          string    `json:"rule,omitempty"`
+	Severity      string    `json:"severity,omitempty"`
+	Message       string    `json:"message,omitempty"`
 }
 
 type SSHAlertsResponse struct {
@@ -889,19 +893,43 @@ func (s *Server) handleSSHAlertsGET(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 
 	query := `
-        SELECT
-            id,
-            created_at,
-            hostname,
-            remote_ip,
-            failed_count,
-            window_minutes,
-            first_seen,
-            last_seen,
-            status
-        FROM ssh_alerts
-        WHERE created_at >= now() - ($1::int || ' minutes')::interval
-    `
+SELECT
+    sa.id,
+    sa.created_at,
+    sa.hostname,
+    sa.remote_ip,
+    COALESCE(meta.username, '') AS username,
+    sa.failed_count,
+    sa.window_minutes,
+    sa.first_seen,
+    sa.last_seen,
+    sa.status,
+    'ssh_bruteforce' AS rule,
+    CASE
+        WHEN sa.failed_count >= 20 THEN 'crítico'
+        WHEN sa.failed_count >= 10 THEN 'alto'
+        ELSE 'medio'
+    END AS severity,
+    format(
+        'Multiples fallos SSH (%s intentos en %s min) desde %s',
+        sa.failed_count,
+        sa.window_minutes,
+        sa.remote_ip
+    ) AS message
+FROM ssh_alerts sa
+LEFT JOIN LATERAL (
+    SELECT e.payload->>'username' AS username
+    FROM raw_events e
+    WHERE e.source = 'auth'
+      AND e.event_type = 'ssh_failed_login'
+      AND e.payload->>'remote_ip' = sa.remote_ip
+      AND e.ts BETWEEN sa.first_seen AND sa.last_seen
+    GROUP BY username
+    ORDER BY COUNT(*) DESC, MAX(e.ts) DESC
+    LIMIT 1
+) meta ON TRUE
+WHERE sa.created_at >= now() - ($1::int || ' minutes')::interval
+`
 	args := []any{windowMinutes}
 	argPos := 2
 
@@ -940,11 +968,15 @@ func (s *Server) handleSSHAlertsGET(w http.ResponseWriter, r *http.Request) {
 			&a.CreatedAt,
 			&a.Hostname,
 			&a.RemoteIP,
+			&a.Username,
 			&a.FailedCount,
 			&a.WindowMinutes,
 			&a.FirstSeen,
 			&a.LastSeen,
 			&a.Status,
+			&a.Rule,
+			&a.Severity,
+			&a.Message,
 		); err != nil {
 			log.Printf("Error escaneando alerta ssh: %v", err)
 			http.Error(w, "error leyendo alertas", http.StatusInternalServerError)
@@ -1011,29 +1043,61 @@ func (s *Server) handleSSHAlertsPATCH(w http.ResponseWriter, r *http.Request) {
 
 	var a SSHAlert
 	err = s.db.QueryRow(ctx, `
-        UPDATE ssh_alerts
-        SET status = $1
-        WHERE id = $2
-        RETURNING
-            id,
-            created_at,
-            hostname,
-            remote_ip,
-            failed_count,
-            window_minutes,
-            first_seen,
-            last_seen,
-            status;
+        WITH updated AS (
+            UPDATE ssh_alerts sa
+            SET status = $1
+            WHERE id = $2
+            RETURNING sa.*
+        )
+        SELECT
+            u.id,
+            u.created_at,
+            u.hostname,
+            u.remote_ip,
+            COALESCE(meta.username, '') AS username,
+            u.failed_count,
+            u.window_minutes,
+            u.first_seen,
+            u.last_seen,
+            u.status,
+            'ssh_bruteforce' AS rule,
+            CASE
+                WHEN u.failed_count >= 20 THEN 'crítico'
+                WHEN u.failed_count >= 10 THEN 'alto'
+                ELSE 'medio'
+            END AS severity,
+            format(
+                'Multiples fallos SSH (%s intentos en %s min) desde %s',
+                u.failed_count,
+                u.window_minutes,
+                u.remote_ip
+            ) AS message
+        FROM updated u
+        LEFT JOIN LATERAL (
+            SELECT e.payload->>'username' AS username
+            FROM raw_events e
+            WHERE e.source = 'auth'
+              AND e.event_type = 'ssh_failed_login'
+              AND e.payload->>'remote_ip' = u.remote_ip
+              AND e.ts BETWEEN u.first_seen AND u.last_seen
+            GROUP BY username
+            ORDER BY COUNT(*) DESC, MAX(e.ts) DESC
+            LIMIT 1
+        ) meta ON TRUE;
     `, newStatus, id).Scan(
 		&a.ID,
 		&a.CreatedAt,
 		&a.Hostname,
 		&a.RemoteIP,
+		&a.Username,
 		&a.FailedCount,
 		&a.WindowMinutes,
 		&a.FirstSeen,
 		&a.LastSeen,
 		&a.Status,
+		&a.Rule,
+		&a.Severity,
+		&a.Message,
 	)
 
 	if err != nil {
