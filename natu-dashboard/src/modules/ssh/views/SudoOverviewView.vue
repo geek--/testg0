@@ -8,9 +8,11 @@
       </p>
       <div class="tabs">
         <a href="/ssh" class="tab">SSH (resumen)</a>
+        <a href="/ssh/activity" class="tab">SSH (actividad)</a>
         <a href="/ssh/alerts" class="tab">Alertas SSH</a>
         <span class="tab tab-active">Sudo (actividad)</span>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
+        <a href="/ssh/criticality" class="tab">Criticidad</a>
       </div>
     </header>
 
@@ -54,6 +56,36 @@
         se usará <strong>sudo_user = "root"</strong>.
       </p>
     </section>
+
+    <div class="activity-toolbar">
+      <div class="activity-toolbar__group">
+        <label class="activity-toolbar__label">Ventana (min)</label>
+        <input
+          v-model.number="windowMinutes"
+          class="activity-toolbar__input"
+          type="number"
+          min="5"
+          max="10080"
+        />
+        <button class="btn-secondary" type="button" @click="refreshData()">
+          Refrescar ahora
+        </button>
+        <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
+      </div>
+
+      <div class="activity-toolbar__group">
+        <label class="activity-toolbar__label">Auto-refresco</label>
+        <select v-model.number="selectedInterval" class="activity-toolbar__input">
+          <option v-for="opt in intervalOptions" :key="opt" :value="opt">
+            Cada {{ opt }}s
+          </option>
+        </select>
+        <label class="activity-toolbar__toggle">
+          <input type="checkbox" v-model="autoRefreshEnabled" />
+          <span>Activado</span>
+        </label>
+      </div>
+    </div>
 
     <!-- Estado: cargando -->
     <section v-if="loading" class="section--loading">
@@ -126,6 +158,8 @@
                 <tr
                   v-for="(u, idx) in usersSummary"
                   :key="u.username + '-' + idx"
+                  class="row--clickable"
+                  @click="openDetail(u, 'Top usuarios usando sudo', 'Usuario sudo')"
                 >
                   <td>{{ idx + 1 }}</td>
                   <td>{{ u.username }}</td>
@@ -144,6 +178,7 @@
                 <tr>
                   <th>Fecha/Hora</th>
                   <th>Host</th>
+                  <th>IP</th>
                   <th>sudo_user</th>
                   <th>target_user</th>
                   <th>Comando</th>
@@ -153,11 +188,12 @@
                 <tr
                   v-for="(e, idx) in events"
                   :key="idx"
+                  class="row--clickable"
                   @click="openDetail(e)"
-                  style="cursor: pointer;"
                 >
                   <td>{{ formatTs(e.ts || e.timestamp || e.time || "") }}</td>
                   <td>{{ e.hostname || e.host || "-" }}</td>
+                  <td>{{ e.remote_ip || e.ip || e.source_ip || "-" }}</td>
                   <td>{{ e.sudo_user || e.username || e.user || "-" }}</td>
                   <td>{{ e.target_user || "-" }}</td>
                   <td>{{ e.command || e.cmd || e.binary || "-" }}</td>
@@ -179,7 +215,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api } from "../../../services/api";
 import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
@@ -187,7 +223,8 @@ import EventDetailDrawer from "../../../components/shared/EventDetailDrawer.vue"
 
 const loading = ref(true);
 const error = ref<string | null>(null);
-const windowMinutes = ref<number | null>(null);
+const windowMinutes = ref<number>(240);
+const lastUpdated = ref<Date | null>(null);
 
 const events = ref<any[]>([]);
 
@@ -200,6 +237,11 @@ const showDetail = ref(false);
 const detailEvent = ref<any | null>(null);
 const detailTitle = ref("Detalle de ejecución sudo");
 const detailSubtitle = ref("Evento enviado por /api/v1/sudo_timeline");
+
+const intervalOptions = [5, 10, 30, 60];
+const selectedInterval = ref<number>(30);
+const autoRefreshEnabled = ref<boolean>(true);
+let refreshHandle: number | null = null;
 
 // por ahora fijo; luego configurable
 const WINDOW_MINUTES = 240;
@@ -244,6 +286,11 @@ const distinctCommands = computed(() => {
   return set.size;
 });
 
+const lastUpdatedLabel = computed(() => {
+  if (!lastUpdated.value) return "—";
+  return lastUpdated.value.toLocaleTimeString();
+});
+
 function formatTs(ts: string): string {
   const d = new Date(ts);
   if (isNaN(d.getTime())) return ts || "—";
@@ -256,7 +303,7 @@ async function loadData() {
 
   try {
     const params: Record<string, any> = {
-      minutes: WINDOW_MINUTES,
+      minutes: windowMinutes.value || WINDOW_MINUTES,
     };
 
     if (sudoUser.value || targetUser.value) {
@@ -282,32 +329,137 @@ async function loadData() {
       (Array.isArray(res) ? res : []);
 
     events.value = Array.isArray(rawEvents) ? rawEvents : [];
+    lastUpdated.value = new Date(res?.generated_at ?? Date.now());
   } catch (e: any) {
     error.value = e?.message ?? String(e);
     events.value = [];
   } finally {
     loading.value = false;
-    if (windowMinutes.value === null) {
+    if (!windowMinutes.value) {
       windowMinutes.value = WINDOW_MINUTES;
     }
   }
 }
 
 function onApplyFilters() {
-  void loadData();
+  void refreshData();
 }
 
-function openDetail(e: any) {
+async function refreshData() {
+  await loadData();
+}
+
+function openDetail(
+  e: any,
+  subtitle = "Evento enviado por /api/v1/sudo_timeline",
+  title = "Detalle de ejecución sudo",
+) {
   detailEvent.value = e;
+  detailSubtitle.value = subtitle;
+  detailTitle.value = title;
   showDetail.value = true;
 }
 
+function clearAutoRefresh() {
+  if (refreshHandle) {
+    window.clearInterval(refreshHandle);
+    refreshHandle = null;
+  }
+}
+
+function setupAutoRefresh() {
+  clearAutoRefresh();
+  if (!autoRefreshEnabled.value) return;
+
+  refreshHandle = window.setInterval(() => {
+    void refreshData();
+  }, selectedInterval.value * 1000);
+}
+
+watch([selectedInterval, autoRefreshEnabled], () => {
+  setupAutoRefresh();
+});
+
+watch(windowMinutes, () => {
+  void refreshData();
+});
+
 onMounted(() => {
-  void loadData();
+  void refreshData();
+  setupAutoRefresh();
+});
+
+onBeforeUnmount(() => {
+  clearAutoRefresh();
 });
 </script>
 
 <style scoped>
+.row--clickable {
+  cursor: pointer;
+}
+
+.activity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.activity-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.activity-toolbar__label {
+  font-size: 0.82rem;
+  color: #cbd5e1;
+}
+
+.activity-toolbar__input {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  color: #e2e8f0;
+  min-width: 90px;
+}
+
+.activity-toolbar__hint {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.activity-toolbar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: #e2e8f0;
+}
+
+.btn-secondary {
+  border-radius: 9999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.9);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.btn-secondary--active {
+  background: linear-gradient(90deg, #2563eb, #4f46e5);
+  border-color: transparent;
+}
+
 .filters-bar {
   display: flex;
   gap: 1rem;
