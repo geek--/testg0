@@ -8,57 +8,85 @@
       </p>
       <div class="tabs">
         <a href="/ssh" class="tab">SSH (resumen)</a>
+        <a href="/ssh/activity" class="tab">SSH (actividad)</a>
         <span class="tab tab-active">Alertas SSH</span>
         <a href="/ssh/sudo" class="tab">Sudo (actividad)</a>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
+        <a href="/ssh/criticality" class="tab">Criticidad</a>
       </div>
     </header>
 
     <section class="page">
-      <div class="stats-grid">
-        <StatCard
-          title="Ventana analizada"
-          :value="(windowMinutes ?? WINDOW_MINUTES) + ' min'"
-          subtitle="Parámetro minutes en /api/v1/ssh_alerts y /api/v1/ssh_suspicious_logins"
-        />
+      <div class="activity-toolbar">
+        <div class="activity-toolbar__group">
+          <label class="activity-toolbar__label">Ventana (min)</label>
+          <input
+            v-model.number="windowMinutes"
+            class="activity-toolbar__input"
+            type="number"
+            min="5"
+            max="10080"
+          />
+          <button class="btn-secondary" type="button" @click="refreshData()">
+            Refrescar ahora
+          </button>
+          <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
+        </div>
 
-        <StatCard
-          title="Alertas SSH"
-          :value="alerts.length"
-          subtitle="Número de alertas generadas en la ventana seleccionada"
-        />
-
-        <StatCard
-          title="Logins sospechosos"
-          :value="suspiciousLogins.length"
-          subtitle="Intentos de acceso catalogados como sospechosos"
-        />
-
-        <StatCard
-          title="Última alerta"
-          :value="lastAlertTsDisplay"
-          subtitle="Marca de tiempo de la alerta más reciente (si existe)"
-        />
+        <div class="activity-toolbar__group">
+          <label class="activity-toolbar__label">Auto-refresco</label>
+          <select v-model.number="selectedInterval" class="activity-toolbar__input">
+            <option v-for="opt in intervalOptions" :key="opt" :value="opt">
+              Cada {{ opt }}s
+            </option>
+          </select>
+          <label class="activity-toolbar__toggle">
+            <input type="checkbox" v-model="autoRefreshEnabled" />
+            <span>Activado</span>
+          </label>
+        </div>
       </div>
 
-      <div
-        v-if="error"
-        class="section--error"
-        style="margin-top: 0.8rem;"
-      >
+      <section v-if="loadingAlerts || loadingSuspicious" class="section--loading">
+        <LoadingSpinner /> Cargando alertas y logins sospechosos...
+      </section>
+
+      <section v-else-if="error" class="section--error">
         {{ error }}
-      </div>
+      </section>
 
-      <div class="tables-grid" style="margin-top: 0.8rem;">
-        <!-- Alertas SSH -->
-        <div class="table-card">
-          <div class="table-card__title">Alertas SSH recientes</div>
+      <template v-else>
+        <div class="stats-grid">
+          <StatCard
+            title="Ventana analizada"
+            :value="(windowMinutes ?? WINDOW_MINUTES) + ' min'"
+            subtitle="Parámetro minutes en /api/v1/ssh_alerts y /api/v1/ssh_suspicious_logins"
+          />
 
-          <div v-if="loadingAlerts" class="section--loading">
-            <LoadingSpinner /> Cargando alertas SSH...
-          </div>
+          <StatCard
+            title="Alertas SSH"
+            :value="alerts.length"
+            subtitle="Número de alertas generadas en la ventana seleccionada"
+          />
 
-          <template v-else>
+          <StatCard
+            title="Logins sospechosos"
+            :value="suspiciousLogins.length"
+            subtitle="Intentos de acceso catalogados como sospechosos"
+          />
+
+          <StatCard
+            title="Última alerta"
+            :value="lastAlertTsDisplay"
+            subtitle="Marca de tiempo de la alerta más reciente (si existe)"
+          />
+        </div>
+
+        <div class="tables-grid" style="margin-top: 0.8rem;">
+          <!-- Alertas SSH -->
+          <div class="table-card">
+            <div class="table-card__title">Alertas SSH recientes</div>
+
             <table class="table">
               <thead>
                 <tr>
@@ -75,8 +103,8 @@
                 <tr
                   v-for="(a, idx) in alerts"
                   :key="idx"
+                  class="row--clickable"
                   @click="openDetail('Alerta SSH', a)"
-                  style="cursor: pointer;"
                 >
                   <td>{{ formatAlertTs(a) }}</td>
                   <td>{{ a.hostname || a.host || "-" }}</td>
@@ -93,18 +121,12 @@
                 </tr>
               </tbody>
             </table>
-          </template>
-        </div>
-
-        <!-- Logins sospechosos -->
-        <div class="table-card">
-          <div class="table-card__title">Logins sospechosos (SSH)</div>
-
-          <div v-if="loadingSuspicious" class="section--loading">
-            <LoadingSpinner /> Cargando logins sospechosos...
           </div>
 
-          <template v-else>
+          <!-- Logins sospechosos -->
+          <div class="table-card">
+            <div class="table-card__title">Logins sospechosos (SSH)</div>
+
             <table class="table">
               <thead>
                 <tr>
@@ -120,8 +142,8 @@
                 <tr
                   v-for="(s, idx) in suspiciousLogins"
                   :key="idx"
+                  class="row--clickable"
                   @click="openDetail('Login sospechoso SSH', s)"
-                  style="cursor: pointer;"
                 >
                   <td>{{ formatSuspiciousTs(s) }}</td>
                   <td>{{ s.hostname || s.host || "-" }}</td>
@@ -144,9 +166,9 @@
                 </tr>
               </tbody>
             </table>
-          </template>
+          </div>
         </div>
-      </div>
+      </template>
     </section>
 
     <EventDetailDrawer
@@ -159,24 +181,17 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api } from "../../../services/api";
 import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
 import EventDetailDrawer from "../../../components/shared/EventDetailDrawer.vue";
 
-// cache simple en memoria (por módulo)
-let cachedAlerts: any[] | null = null;
-let cachedSuspicious: any[] | null = null;
-let cachedWindowMinutes: number | null = null;
-let lastFetchMs = 0;
-const CACHE_MS = 60_000; // 60 segundos
-
 const error = ref<string | null>(null);
 
 const alerts = ref<any[]>([]);
 const suspiciousLogins = ref<any[]>([]);
-const windowMinutes = ref<number | null>(null);
+const windowMinutes = ref<number>(240);
 
 const loadingAlerts = ref(true);
 const loadingSuspicious = ref(true);
@@ -187,8 +202,12 @@ const detailEvent = ref<any | null>(null);
 const detailTitle = ref("Detalle");
 const detailSubtitle = ref("");
 
-// por ahora fijo; luego configurable
 const WINDOW_MINUTES = 240;
+const intervalOptions = [5, 10, 30, 60];
+const selectedInterval = ref<number>(30);
+const autoRefreshEnabled = ref<boolean>(true);
+let refreshHandle: number | null = null;
+const lastUpdated = ref<Date | null>(null);
 
 // ---- helpers para columnas dinámicas ----
 function resolveFailedBefore(s: any): number | null {
@@ -225,6 +244,11 @@ const hasFailedBeforeColumn = computed(() =>
 const hasReasonColumn = computed(() =>
   suspiciousLogins.value.some((s) => resolveReason(s) !== null),
 );
+
+const lastUpdatedLabel = computed(() => {
+  if (!lastUpdated.value) return "—";
+  return lastUpdated.value.toLocaleTimeString();
+});
 
 // ---- últimos tiempos / formato ----
 const lastAlertTsDisplay = computed(() => {
@@ -263,31 +287,18 @@ function formatSuspiciousTs(s: any): string {
   return formatTs(extractTs(s));
 }
 
-// ---- carga de datos con cache ----
+// ---- carga de datos ----
 async function loadData() {
   error.value = null;
-
-  const now = Date.now();
-  if (
-    cachedAlerts &&
-    cachedSuspicious &&
-    now - lastFetchMs < CACHE_MS
-  ) {
-    alerts.value = cachedAlerts;
-    suspiciousLogins.value = cachedSuspicious;
-    windowMinutes.value = cachedWindowMinutes ?? WINDOW_MINUTES;
-    loadingAlerts.value = false;
-    loadingSuspicious.value = false;
-    return;
-  }
-
   loadingAlerts.value = true;
   loadingSuspicious.value = true;
 
+  const minutes = windowMinutes.value || WINDOW_MINUTES;
+
   try {
     const [alertsRes, suspRes] = await Promise.allSettled([
-      api.get<any>("/ssh_alerts", { minutes: WINDOW_MINUTES }),
-      api.get<any>("/ssh_suspicious_logins", { minutes: WINDOW_MINUTES }),
+      api.get<any>("/ssh_alerts", { minutes }),
+      api.get<any>("/ssh_suspicious_logins", { minutes }),
     ]);
 
     if (alertsRes.status === "fulfilled") {
@@ -310,10 +321,7 @@ async function loadData() {
 
     if (suspRes.status === "fulfilled") {
       const data = suspRes.value;
-      if (
-        windowMinutes.value === null &&
-        typeof data?.window_minutes === "number"
-      ) {
+      if (typeof data?.window_minutes === "number") {
         windowMinutes.value = data.window_minutes;
       }
 
@@ -340,18 +348,43 @@ async function loadData() {
         "No se pudieron obtener ni las alertas SSH ni los logins sospechosos. Revisa el estado del natu-core.";
     }
 
-    cachedAlerts = alerts.value;
-    cachedSuspicious = suspiciousLogins.value;
-    cachedWindowMinutes = windowMinutes.value ?? WINDOW_MINUTES;
-    lastFetchMs = Date.now();
+    lastUpdated.value = new Date();
   } finally {
     loadingAlerts.value = false;
     loadingSuspicious.value = false;
-    if (windowMinutes.value === null) {
+    if (!windowMinutes.value) {
       windowMinutes.value = WINDOW_MINUTES;
     }
   }
 }
+
+async function refreshData() {
+  await loadData();
+}
+
+function clearAutoRefresh() {
+  if (refreshHandle) {
+    window.clearInterval(refreshHandle);
+    refreshHandle = null;
+  }
+}
+
+function setupAutoRefresh() {
+  clearAutoRefresh();
+  if (!autoRefreshEnabled.value) return;
+
+  refreshHandle = window.setInterval(() => {
+    void refreshData();
+  }, selectedInterval.value * 1000);
+}
+
+watch([selectedInterval, autoRefreshEnabled], () => {
+  setupAutoRefresh();
+});
+
+watch(windowMinutes, () => {
+  void refreshData();
+});
 
 function openDetail(title: string, evt: any) {
   detailTitle.value = title;
@@ -361,6 +394,78 @@ function openDetail(title: string, evt: any) {
 }
 
 onMounted(() => {
-  void loadData();
+  void refreshData();
+  setupAutoRefresh();
+});
+
+onBeforeUnmount(() => {
+  clearAutoRefresh();
 });
 </script>
+
+<style scoped>
+.row--clickable {
+  cursor: pointer;
+}
+
+.activity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.activity-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.activity-toolbar__label {
+  font-size: 0.82rem;
+  color: #cbd5e1;
+}
+
+.activity-toolbar__input {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  color: #e2e8f0;
+  min-width: 90px;
+}
+
+.activity-toolbar__hint {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.activity-toolbar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: #e2e8f0;
+}
+
+.btn-secondary {
+  border-radius: 9999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.9);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.btn-secondary--active {
+  background: linear-gradient(90deg, #2563eb, #4f46e5);
+  border-color: transparent;
+}
+</style>
