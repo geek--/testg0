@@ -39,9 +39,10 @@
             </select>
           </div>
 
-          <label class="activity-toolbar__toggle">
+          <label class="switcher">
             <input type="checkbox" v-model="autoRefreshEnabled" />
-            <span>Auto</span>
+            <span class="switcher__slider" />
+            <span class="switcher__label">Auto</span>
           </label>
           <button class="btn-secondary" type="button" @click="refreshData()">
             Refrescar ahora
@@ -51,22 +52,38 @@
 
         <div class="activity-toolbar__group activity-toolbar__group--filters">
           <span class="activity-toolbar__label">Capas en el termómetro</span>
-          <div class="filter-chips">
-            <label class="filter-chip">
+          <div class="filter-switches">
+            <label class="switcher switcher--inline">
               <input type="checkbox" v-model="filters.alerts" />
-              Alertas SSH
+              <span class="switcher__slider" />
+              <div class="switcher__text">
+                <span class="switcher__title">Alertas SSH</span>
+                <small>Fuerza bruta y picos de intentos</small>
+              </div>
             </label>
-            <label class="filter-chip">
+            <label class="switcher switcher--inline">
               <input type="checkbox" v-model="filters.suspicious" />
-              Logins sospechosos
+              <span class="switcher__slider" />
+              <div class="switcher__text">
+                <span class="switcher__title">Logins sospechosos</span>
+                <small>Accesos exitosos tras fallos</small>
+              </div>
             </label>
-            <label class="filter-chip">
+            <label class="switcher switcher--inline">
               <input type="checkbox" v-model="filters.sudo" />
-              Alertas sudo
+              <span class="switcher__slider" />
+              <div class="switcher__text">
+                <span class="switcher__title">Alertas sudo</span>
+                <small>Comandos críticos con sudo</small>
+              </div>
             </label>
-            <label class="filter-chip">
+            <label class="switcher switcher--inline">
               <input type="checkbox" v-model="filters.activity" />
-              Actividad SSH
+              <span class="switcher__slider" />
+              <div class="switcher__text">
+                <span class="switcher__title">Actividad SSH</span>
+                <small>Volumen de autenticaciones</small>
+              </div>
             </label>
           </div>
         </div>
@@ -81,61 +98,73 @@
       </section>
 
       <template v-else>
-        <div class="thermo-layout">
-          <div class="thermo-card">
-            <div class="thermo-card__header">
-              <div>
-                <div class="thermo-card__title">Termómetro de criticidad</div>
-                <div class="thermo-card__subtitle">
-                  Pondera alertas, logins sospechosos y actividad reciente en la ventana seleccionada.
-                </div>
-                <div class="thermo-card__legend-grid">
-                  <div v-for="level in legendLevels" :key="level.label" class="legend-pill">
-                    <span class="legend-pill__dot" :style="{ background: level.color }"></span>
-                    <div>
-                      <div class="legend-pill__label">{{ level.label }}</div>
-                      <div class="legend-pill__range">{{ level.range }}</div>
-                    </div>
-                  </div>
+        <div class="hero-grid">
+          <div class="card legend-card">
+            <div class="card__title">Leyenda de niveles</div>
+            <div class="legend-list">
+              <div v-for="level in legendLevels" :key="level.label" class="legend-list__item">
+                <span class="legend-pill__dot" :style="{ background: level.color }"></span>
+                <div class="legend-list__text">
+                  <div class="legend-list__label">{{ level.label }}</div>
+                  <div class="legend-list__range">{{ level.range }}</div>
                 </div>
               </div>
-              <div class="gauge">
-                <div class="gauge__ring" :style="{ backgroundImage: gaugeGradient }"></div>
-                <div class="gauge__center">
-                  <div class="gauge__score">{{ riskScore }}%</div>
-                  <div class="gauge__label">{{ riskLabel }}</div>
-                </div>
-              </div>
-            </div>
-            <div class="thermo">
-              <div class="thermo__fill" :style="{ width: riskScore + '%', background: riskColor }"></div>
-            </div>
-            <div class="thermo-card__legend">
-              <strong>{{ riskLabel }}</strong>
-              · {{ riskSummary }}
             </div>
           </div>
 
-          <div class="stacked-card">
-            <div class="stacked-card__header">
-              <div class="stacked-card__title">Contribución por capa</div>
-              <div class="stacked-card__subtitle">Distribución ponderada de riesgo</div>
-            </div>
-            <div class="stacked-bars">
-              <div
-                v-for="item in contributionBars"
-                :key="item.label"
-                class="stacked-bar"
-              >
-                <div class="stacked-bar__label">{{ item.label }}</div>
-                <div class="stacked-bar__meter">
-                  <div
-                    class="stacked-bar__fill"
-                    :style="{ width: item.width + '%', background: item.color }"
-                  ></div>
-                </div>
-                <div class="stacked-bar__value">{{ item.valueLabel }}</div>
+          <div class="card gauge-card">
+            <div class="card__title">Termómetro de criticidad</div>
+            <p class="card__subtitle">
+              Pondera alertas, logins sospechosos y actividad reciente en la ventana seleccionada.
+            </p>
+            <div class="gauge">
+              <div class="gauge__ring" :style="{ backgroundImage: gaugeGradient }"></div>
+              <div class="gauge__center">
+                <div class="gauge__score">{{ riskScore }}%</div>
+                <div class="gauge__label">{{ riskLabel }}</div>
               </div>
+            </div>
+            <div class="gauge-card__footer">
+              <div class="thermo-card__legend">
+                <strong>{{ riskLabel }}</strong>
+                · {{ riskSummary }}
+              </div>
+            </div>
+          </div>
+
+          <div class="card summary-bar">
+            <div class="card__title">Resumen visual</div>
+            <div class="thermo">
+              <div class="thermo__fill" :style="{ width: riskScore + '%', background: riskColor }"></div>
+            </div>
+            <div class="summary-bar__labels">
+              <span>Bajo</span>
+              <span>Moderado</span>
+              <span>Alto</span>
+              <span>Crítico</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="stacked-card">
+          <div class="stacked-card__header">
+            <div class="stacked-card__title">Contribución por capa</div>
+            <div class="stacked-card__subtitle">Distribución ponderada de riesgo</div>
+          </div>
+          <div class="stacked-bars">
+            <div
+              v-for="item in contributionBars"
+              :key="item.label"
+              class="stacked-bar"
+            >
+              <div class="stacked-bar__label">{{ item.label }}</div>
+              <div class="stacked-bar__meter">
+                <div
+                  class="stacked-bar__fill"
+                  :style="{ width: item.width + '%', background: item.color }"
+                ></div>
+              </div>
+              <div class="stacked-bar__value">{{ item.valueLabel }}</div>
             </div>
           </div>
         </div>
@@ -488,60 +517,158 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.thermo-card {
-  background: #0f172a;
+.activity-toolbar--wide {
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.activity-toolbar__group--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.activity-toolbar__inline-field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.activity-toolbar__group--filters {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.filter-switches {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.switcher {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #0b1220;
   border: 1px solid #1f2937;
   border-radius: 10px;
-  padding: 1rem;
-  margin-bottom: 1rem;
+  padding: 0.5rem 0.75rem;
 }
 
-.thermo-layout {
+.switcher input {
+  position: absolute;
+  opacity: 0;
+}
+
+.switcher__slider {
+  width: 44px;
+  height: 22px;
+  border-radius: 999px;
+  background: #111827;
+  box-shadow: inset 0 0 0 1px #1f2937;
+  position: relative;
+  transition: background 0.25s ease;
+}
+
+.switcher__slider::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.25s ease, background 0.25s ease;
+}
+
+.switcher input:checked + .switcher__slider {
+  background: #0ea5e9;
+}
+
+.switcher input:checked + .switcher__slider::after {
+  transform: translateX(22px);
+  background: #0b1220;
+}
+
+.switcher__label {
+  font-weight: 600;
+}
+
+.switcher--inline {
+  align-items: flex-start;
+  padding: 0.6rem 0.8rem;
+}
+
+.switcher__text {
   display: grid;
-  grid-template-columns: 1.5fr 1fr;
-  gap: 1rem;
-  align-items: stretch;
+  gap: 0.1rem;
 }
 
-@media (max-width: 1024px) {
-  .thermo-layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-.thermo-card__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.thermo-card__title {
-  font-size: 1.1rem;
+.switcher__title {
   font-weight: 700;
 }
 
-.thermo-card__subtitle {
-  font-size: 0.9rem;
+.switcher small {
   color: #9ca3af;
 }
 
-.thermo-card__legend-grid {
+.hero-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 0.5rem;
-  margin-top: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+  align-items: stretch;
 }
 
-.legend-pill {
+.card {
+  background: #0f172a;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.card__title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.card__subtitle {
+  color: #9ca3af;
+  font-size: 0.9rem;
+}
+
+.legend-card {
+  grid-row: span 2;
+  align-self: start;
+}
+
+.legend-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.legend-list__item {
   display: grid;
   grid-template-columns: auto 1fr;
-  align-items: center;
   gap: 0.5rem;
-  padding: 0.6rem 0.75rem;
+  align-items: center;
+  padding: 0.55rem 0.65rem;
   background: #111827;
   border: 1px solid #1f2937;
-  border-radius: 8px;
+  border-radius: 10px;
+}
+
+.legend-list__label {
+  font-weight: 700;
+}
+
+.legend-list__range {
+  color: #9ca3af;
+  font-size: 0.85rem;
 }
 
 .legend-pill__dot {
@@ -550,33 +677,22 @@ onBeforeUnmount(() => {
   border-radius: 50%;
 }
 
-.legend-pill__label {
-  font-weight: 700;
-  font-size: 0.9rem;
-}
-
-.legend-pill__range {
-  font-size: 0.75rem;
-  color: #9ca3af;
-}
-
-.thermo-card__score {
-  font-size: 2rem;
-  font-weight: 800;
-  color: #e2e8f0;
+.gauge-card {
+  justify-items: center;
+  text-align: center;
 }
 
 .gauge {
   position: relative;
-  width: 150px;
-  height: 150px;
+  width: 180px;
+  height: 180px;
   display: grid;
   place-items: center;
 }
 
 .gauge__ring {
-  width: 150px;
-  height: 150px;
+  width: 180px;
+  height: 180px;
   border-radius: 50%;
   background: conic-gradient(#22c55e 0deg, rgba(255, 255, 255, 0.05) 0deg);
   display: grid;
@@ -597,23 +713,38 @@ onBeforeUnmount(() => {
 }
 
 .gauge__score {
-  font-size: 1.9rem;
+  font-size: 2rem;
   font-weight: 800;
 }
 
 .gauge__label {
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: #9ca3af;
+}
+
+.gauge-card__footer {
+  width: 100%;
+  border-top: 1px solid #1f2937;
+  padding-top: 0.5rem;
+}
+
+.thermo-card__legend {
+  font-size: 0.95rem;
+  color: #e5e7eb;
+}
+
+.summary-bar {
+  grid-column: 1 / -1;
 }
 
 .thermo {
   position: relative;
   width: 100%;
-  height: 16px;
-  background: #1f2937;
-  border-radius: 8px;
+  height: 18px;
+  background: #111827;
+  border-radius: 10px;
   overflow: hidden;
-  margin: 0.75rem 0;
+  border: 1px solid #1f2937;
 }
 
 .thermo__fill {
@@ -626,54 +757,17 @@ onBeforeUnmount(() => {
   transition: width 0.4s ease;
 }
 
-.thermo-card__legend {
-  font-size: 0.95rem;
-  color: #e5e7eb;
-}
-
-.activity-toolbar--wide {
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.activity-toolbar__group--inline {
+.summary-bar__labels {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.activity-toolbar__inline-field {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.activity-toolbar__group--filters {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.filter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.filter-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.35rem 0.65rem;
-  background: #111827;
-  border: 1px solid #1f2937;
-  border-radius: 20px;
-  font-size: 0.9rem;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: #9ca3af;
 }
 
 .stacked-card {
   background: #0f172a;
   border: 1px solid #1f2937;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 1rem;
   display: grid;
   gap: 0.75rem;
@@ -733,5 +827,19 @@ onBeforeUnmount(() => {
   font-size: 0.82rem;
   color: #9ca3af;
   text-align: center;
+}
+
+@media (max-width: 1024px) {
+  .legend-card {
+    grid-row: auto;
+  }
+
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-bar {
+    grid-column: auto;
+  }
 }
 </style>
