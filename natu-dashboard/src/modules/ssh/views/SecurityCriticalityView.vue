@@ -17,73 +17,63 @@
     </header>
 
     <section class="page">
-      <div class="activity-toolbar activity-toolbar--wide">
-        <div class="activity-toolbar__group activity-toolbar__group--inline">
-          <div class="activity-toolbar__inline-field">
-            <label class="activity-toolbar__label">Ventana (min)</label>
-            <input
-              v-model.number="windowMinutes"
-              class="activity-toolbar__input"
-              type="number"
-              min="30"
-              max="10080"
-            />
-          </div>
+      <div class="activity-toolbar">
+        <div class="activity-toolbar__group">
+          <label class="activity-toolbar__label">Ventana (min)</label>
+          <input
+            v-model.number="windowMinutes"
+            class="activity-toolbar__input"
+            type="number"
+            min="30"
+            max="10080"
+          />
 
-          <div class="activity-toolbar__inline-field">
-            <label class="activity-toolbar__label">Auto-refresco</label>
-            <select v-model.number="selectedInterval" class="activity-toolbar__input">
-              <option v-for="opt in intervalOptions" :key="opt" :value="opt">
-                Cada {{ opt }}s
-              </option>
-            </select>
-          </div>
-
-          <label class="switcher">
-            <input type="checkbox" v-model="autoRefreshEnabled" />
-            <span class="switcher__slider" />
-            <span class="switcher__label">Auto</span>
-          </label>
           <button class="btn-secondary" type="button" @click="refreshData()">
             Refrescar ahora
           </button>
           <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
 
-        <div class="activity-toolbar__group activity-toolbar__group--filters">
-          <span class="activity-toolbar__label">Capas en el termómetro</span>
-          <div class="filter-switches">
-            <label class="switcher switcher--inline">
+        <div class="activity-toolbar__group">
+          <label class="activity-toolbar__label">Auto-refresco</label>
+          <select v-model.number="selectedInterval" class="activity-toolbar__input">
+            <option v-for="opt in intervalOptions" :key="opt" :value="opt">
+              Cada {{ opt }}s
+            </option>
+          </select>
+          <label class="activity-toolbar__toggle">
+            <input type="checkbox" v-model="autoRefreshEnabled" />
+            <span>Auto</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card filter-card">
+        <div class="filter-card__header">
+          <div>
+            <div class="filter-card__title">Capas en el termómetro</div>
+            <div class="filter-card__subtitle">Activa o desactiva cada capa de riesgo</div>
+          </div>
+          <div class="filter-card__inline">
+            <label class="switcher">
               <input type="checkbox" v-model="filters.alerts" />
               <span class="switcher__slider" />
-              <div class="switcher__text">
-                <span class="switcher__title">Alertas SSH</span>
-                <small>Fuerza bruta y picos de intentos</small>
-              </div>
+              <span class="switcher__label">Alertas SSH</span>
             </label>
-            <label class="switcher switcher--inline">
+            <label class="switcher">
               <input type="checkbox" v-model="filters.suspicious" />
               <span class="switcher__slider" />
-              <div class="switcher__text">
-                <span class="switcher__title">Logins sospechosos</span>
-                <small>Accesos exitosos tras fallos</small>
-              </div>
+              <span class="switcher__label">Logins sospechosos</span>
             </label>
-            <label class="switcher switcher--inline">
+            <label class="switcher">
               <input type="checkbox" v-model="filters.sudo" />
               <span class="switcher__slider" />
-              <div class="switcher__text">
-                <span class="switcher__title">Alertas sudo</span>
-                <small>Comandos críticos con sudo</small>
-              </div>
+              <span class="switcher__label">Alertas sudo</span>
             </label>
-            <label class="switcher switcher--inline">
+            <label class="switcher">
               <input type="checkbox" v-model="filters.activity" />
               <span class="switcher__slider" />
-              <div class="switcher__text">
-                <span class="switcher__title">Actividad SSH</span>
-                <small>Volumen de autenticaciones</small>
-              </div>
+              <span class="switcher__label">Actividad SSH</span>
             </label>
           </div>
         </div>
@@ -132,6 +122,29 @@
             </div>
           </div>
 
+          <div class="card contribution-card">
+            <div class="stacked-card__header">
+              <div class="stacked-card__title">Contribución por capa</div>
+              <div class="stacked-card__subtitle">Distribución ponderada de riesgo</div>
+            </div>
+            <div class="stacked-bars">
+              <div
+                v-for="item in contributionBars"
+                :key="item.label"
+                class="stacked-bar"
+              >
+                <div class="stacked-bar__label">{{ item.label }}</div>
+                <div class="stacked-bar__meter">
+                  <div
+                    class="stacked-bar__fill"
+                    :style="{ width: item.width + '%', background: item.color }"
+                  ></div>
+                </div>
+                <div class="stacked-bar__value">{{ item.valueLabel }}</div>
+              </div>
+            </div>
+          </div>
+
           <div class="card summary-bar">
             <div class="card__title">Resumen visual</div>
             <div class="thermo">
@@ -142,29 +155,6 @@
               <span>Moderado</span>
               <span>Alto</span>
               <span>Crítico</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="stacked-card">
-          <div class="stacked-card__header">
-            <div class="stacked-card__title">Contribución por capa</div>
-            <div class="stacked-card__subtitle">Distribución ponderada de riesgo</div>
-          </div>
-          <div class="stacked-bars">
-            <div
-              v-for="item in contributionBars"
-              :key="item.label"
-              class="stacked-bar"
-            >
-              <div class="stacked-bar__label">{{ item.label }}</div>
-              <div class="stacked-bar__meter">
-                <div
-                  class="stacked-bar__fill"
-                  :style="{ width: item.width + '%', background: item.color }"
-                ></div>
-              </div>
-              <div class="stacked-bar__value">{{ item.valueLabel }}</div>
             </div>
           </div>
         </div>
@@ -517,32 +507,87 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.activity-toolbar--wide {
-  flex-direction: column;
-  gap: 0.75rem;
+.activity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.6);
 }
 
-.activity-toolbar__group--inline {
+.activity-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.activity-toolbar__label {
+  font-size: 0.82rem;
+  color: #cbd5e1;
+}
+
+.activity-toolbar__input {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  color: #e2e8f0;
+  min-width: 90px;
+}
+
+.activity-toolbar__hint {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.activity-toolbar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: #e2e8f0;
+}
+
+.btn-secondary {
+  border-radius: 9999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.9);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.filter-card {
+  margin: 0.75rem 0 1rem;
+}
+
+.filter-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.filter-card__title {
+  font-weight: 700;
+}
+
+.filter-card__subtitle {
+  color: #9ca3af;
+  font-size: 0.85rem;
+}
+
+.filter-card__inline {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.activity-toolbar__inline-field {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.activity-toolbar__group--filters {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.filter-switches {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .switcher {
@@ -616,7 +661,7 @@ onBeforeUnmount(() => {
 
 .hero-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1rem;
   margin-bottom: 1rem;
   align-items: stretch;
@@ -643,6 +688,10 @@ onBeforeUnmount(() => {
 
 .legend-card {
   grid-row: span 2;
+  align-self: start;
+}
+
+.contribution-card {
   align-self: start;
 }
 
@@ -725,12 +774,16 @@ onBeforeUnmount(() => {
 .gauge-card__footer {
   width: 100%;
   border-top: 1px solid #1f2937;
-  padding-top: 0.5rem;
+  padding-top: 0.75rem;
+  margin-top: 0.25rem;
 }
 
 .thermo-card__legend {
   font-size: 0.95rem;
   color: #e5e7eb;
+  display: flex;
+  justify-content: center;
+  gap: 0.35rem;
 }
 
 .summary-bar {
