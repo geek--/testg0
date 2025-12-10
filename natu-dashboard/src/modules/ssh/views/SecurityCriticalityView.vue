@@ -17,33 +17,58 @@
     </header>
 
     <section class="page">
-      <div class="activity-toolbar">
-        <div class="activity-toolbar__group">
-          <label class="activity-toolbar__label">Ventana (min)</label>
-          <input
-            v-model.number="windowMinutes"
-            class="activity-toolbar__input"
-            type="number"
-            min="30"
-            max="10080"
-          />
+      <div class="activity-toolbar activity-toolbar--wide">
+        <div class="activity-toolbar__group activity-toolbar__group--inline">
+          <div class="activity-toolbar__inline-field">
+            <label class="activity-toolbar__label">Ventana (min)</label>
+            <input
+              v-model.number="windowMinutes"
+              class="activity-toolbar__input"
+              type="number"
+              min="30"
+              max="10080"
+            />
+          </div>
+
+          <div class="activity-toolbar__inline-field">
+            <label class="activity-toolbar__label">Auto-refresco</label>
+            <select v-model.number="selectedInterval" class="activity-toolbar__input">
+              <option v-for="opt in intervalOptions" :key="opt" :value="opt">
+                Cada {{ opt }}s
+              </option>
+            </select>
+          </div>
+
+          <label class="activity-toolbar__toggle">
+            <input type="checkbox" v-model="autoRefreshEnabled" />
+            <span>Auto</span>
+          </label>
           <button class="btn-secondary" type="button" @click="refreshData()">
             Refrescar ahora
           </button>
           <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
 
-        <div class="activity-toolbar__group">
-          <label class="activity-toolbar__label">Auto-refresco</label>
-          <select v-model.number="selectedInterval" class="activity-toolbar__input">
-            <option v-for="opt in intervalOptions" :key="opt" :value="opt">
-              Cada {{ opt }}s
-            </option>
-          </select>
-          <label class="activity-toolbar__toggle">
-            <input type="checkbox" v-model="autoRefreshEnabled" />
-            <span>Activado</span>
-          </label>
+        <div class="activity-toolbar__group activity-toolbar__group--filters">
+          <span class="activity-toolbar__label">Capas en el termómetro</span>
+          <div class="filter-chips">
+            <label class="filter-chip">
+              <input type="checkbox" v-model="filters.alerts" />
+              Alertas SSH
+            </label>
+            <label class="filter-chip">
+              <input type="checkbox" v-model="filters.suspicious" />
+              Logins sospechosos
+            </label>
+            <label class="filter-chip">
+              <input type="checkbox" v-model="filters.sudo" />
+              Alertas sudo
+            </label>
+            <label class="filter-chip">
+              <input type="checkbox" v-model="filters.activity" />
+              Actividad SSH
+            </label>
+          </div>
         </div>
       </div>
 
@@ -56,22 +81,62 @@
       </section>
 
       <template v-else>
-        <div class="thermo-card">
-          <div class="thermo-card__header">
-            <div>
-              <div class="thermo-card__title">Termómetro de criticidad</div>
-              <div class="thermo-card__subtitle">
-                Pondera alertas, logins sospechosos y actividad reciente en la ventana seleccionada.
+        <div class="thermo-layout">
+          <div class="thermo-card">
+            <div class="thermo-card__header">
+              <div>
+                <div class="thermo-card__title">Termómetro de criticidad</div>
+                <div class="thermo-card__subtitle">
+                  Pondera alertas, logins sospechosos y actividad reciente en la ventana seleccionada.
+                </div>
+                <div class="thermo-card__legend-grid">
+                  <div v-for="level in legendLevels" :key="level.label" class="legend-pill">
+                    <span class="legend-pill__dot" :style="{ background: level.color }"></span>
+                    <div>
+                      <div class="legend-pill__label">{{ level.label }}</div>
+                      <div class="legend-pill__range">{{ level.range }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="gauge">
+                <div class="gauge__ring" :style="{ backgroundImage: gaugeGradient }"></div>
+                <div class="gauge__center">
+                  <div class="gauge__score">{{ riskScore }}%</div>
+                  <div class="gauge__label">{{ riskLabel }}</div>
+                </div>
               </div>
             </div>
-            <div class="thermo-card__score">{{ riskScore }}%</div>
+            <div class="thermo">
+              <div class="thermo__fill" :style="{ width: riskScore + '%', background: riskColor }"></div>
+            </div>
+            <div class="thermo-card__legend">
+              <strong>{{ riskLabel }}</strong>
+              · {{ riskSummary }}
+            </div>
           </div>
-          <div class="thermo">
-            <div class="thermo__fill" :style="{ width: riskScore + '%', background: riskColor }"></div>
-          </div>
-          <div class="thermo-card__legend">
-            <strong>{{ riskLabel }}</strong>
-            · {{ riskSummary }}
+
+          <div class="stacked-card">
+            <div class="stacked-card__header">
+              <div class="stacked-card__title">Contribución por capa</div>
+              <div class="stacked-card__subtitle">Distribución ponderada de riesgo</div>
+            </div>
+            <div class="stacked-bars">
+              <div
+                v-for="item in contributionBars"
+                :key="item.label"
+                class="stacked-bar"
+              >
+                <div class="stacked-bar__label">{{ item.label }}</div>
+                <div class="stacked-bar__meter">
+                  <div
+                    class="stacked-bar__fill"
+                    :style="{ width: item.width + '%', background: item.color }"
+                  ></div>
+                </div>
+                <div class="stacked-bar__value">{{ item.valueLabel }}</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -192,6 +257,13 @@ const lastUpdated = ref<Date | null>(null);
 const loading = ref<boolean>(true);
 const error = ref<string | null>(null);
 
+const filters = ref({
+  alerts: true,
+  suspicious: true,
+  sudo: true,
+  activity: true,
+});
+
 const windowMinutes = ref<number>(240);
 const intervalOptions = [5, 10, 30, 60];
 const selectedInterval = ref<number>(30);
@@ -215,10 +287,10 @@ const lastUpdatedLabel = computed(() => {
 
 const riskScore = computed(() => {
   let score = 0;
-  score += Math.min(alerts.value.length * 10, 40);
-  score += Math.min(suspiciousLogins.value.length * 12, 30);
-  score += Math.min(sudoAlerts.value.length * 8, 20);
-  score += Math.min(activityEvents.value.length / 200 * 10, 10);
+  if (filters.value.alerts) score += Math.min(alerts.value.length * 10, 40);
+  if (filters.value.suspicious) score += Math.min(suspiciousLogins.value.length * 12, 30);
+  if (filters.value.sudo) score += Math.min(sudoAlerts.value.length * 8, 20);
+  if (filters.value.activity) score += Math.min((activityEvents.value.length / 200) * 10, 10);
   return Math.round(Math.min(100, score));
 });
 
@@ -238,6 +310,56 @@ const riskColor = computed(() => {
 
 const riskSummary = computed(() => {
   return `Alertas SSH: ${alerts.value.length} · Logins sospechosos: ${suspiciousLogins.value.length} · Alertas sudo: ${sudoAlerts.value.length}`;
+});
+
+const gaugeGradient = computed(() => {
+  return `conic-gradient(${riskColor.value} ${riskScore.value * 3.6}deg, rgba(255,255,255,0.06) ${riskScore.value * 3.6}deg)`;
+});
+
+const legendLevels = [
+  { label: "Bajo", range: "0-24%", color: "#22c55e" },
+  { label: "Moderado", range: "25-49%", color: "#eab308" },
+  { label: "Alto", range: "50-74%", color: "#f97316" },
+  { label: "Crítico", range: "75-100%", color: "#ef4444" },
+];
+
+const contributionBars = computed(() => {
+  const entries = [
+    {
+      label: "Alertas SSH",
+      value: filters.value.alerts ? alerts.value.length * 10 : 0,
+      max: 40,
+      color: "#fb7185",
+    },
+    {
+      label: "Logins sospechosos",
+      value: filters.value.suspicious ? suspiciousLogins.value.length * 12 : 0,
+      max: 30,
+      color: "#facc15",
+    },
+    {
+      label: "Alertas sudo",
+      value: filters.value.sudo ? sudoAlerts.value.length * 8 : 0,
+      max: 20,
+      color: "#34d399",
+    },
+    {
+      label: "Actividad SSH",
+      value: filters.value.activity ? (activityEvents.value.length / 200) * 10 : 0,
+      max: 10,
+      color: "#60a5fa",
+    },
+  ];
+
+  return entries.map((entry) => {
+    const width = Math.min(100, Math.round((entry.value / entry.max) * 100));
+    return {
+      label: entry.label,
+      width,
+      color: entry.color,
+      valueLabel: `${Math.round(Math.min(entry.value, entry.max))} pts`,
+    };
+  });
 });
 
 const spotlightEvents = computed(() => {
@@ -374,6 +496,19 @@ onBeforeUnmount(() => {
   margin-bottom: 1rem;
 }
 
+.thermo-layout {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+@media (max-width: 1024px) {
+  .thermo-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .thermo-card__header {
   display: flex;
   align-items: center;
@@ -391,10 +526,84 @@ onBeforeUnmount(() => {
   color: #9ca3af;
 }
 
+.thermo-card__legend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.legend-pill {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+}
+
+.legend-pill__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.legend-pill__label {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.legend-pill__range {
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
 .thermo-card__score {
   font-size: 2rem;
   font-weight: 800;
   color: #e2e8f0;
+}
+
+.gauge {
+  position: relative;
+  width: 150px;
+  height: 150px;
+  display: grid;
+  place-items: center;
+}
+
+.gauge__ring {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: conic-gradient(#22c55e 0deg, rgba(255, 255, 255, 0.05) 0deg);
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  box-shadow: inset 0 0 0 1px #1f2937;
+}
+
+.gauge__center {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #0b1220;
+  display: grid;
+  place-items: center;
+  gap: 0.15rem;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+}
+
+.gauge__score {
+  font-size: 1.9rem;
+  font-weight: 800;
+}
+
+.gauge__label {
+  font-size: 0.9rem;
+  color: #9ca3af;
 }
 
 .thermo {
@@ -420,6 +629,104 @@ onBeforeUnmount(() => {
 .thermo-card__legend {
   font-size: 0.95rem;
   color: #e5e7eb;
+}
+
+.activity-toolbar--wide {
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.activity-toolbar__group--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.activity-toolbar__inline-field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.activity-toolbar__group--filters {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 20px;
+  font-size: 0.9rem;
+}
+
+.stacked-card {
+  background: #0f172a;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.stacked-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stacked-card__title {
+  font-weight: 700;
+}
+
+.stacked-card__subtitle {
+  font-size: 0.85rem;
+  color: #9ca3af;
+}
+
+.stacked-bars {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.stacked-bar {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.stacked-bar__label {
+  font-size: 0.9rem;
+  color: #e5e7eb;
+}
+
+.stacked-bar__meter {
+  width: 100%;
+  height: 12px;
+  background: #111827;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #1f2937;
+}
+
+.stacked-bar__fill {
+  height: 100%;
+  width: 0;
+  transition: width 0.35s ease;
+}
+
+.stacked-bar__value {
+  font-size: 0.85rem;
+  color: #9ca3af;
 }
 
 .table-empty {
