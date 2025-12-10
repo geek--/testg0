@@ -8,11 +8,42 @@
       </p>
       <div class="tabs">
         <a href="/ssh" class="tab">SSH (resumen)</a>
+        <a href="/ssh/activity" class="tab">SSH (actividad)</a>
         <a href="/ssh/alerts" class="tab">Alertas SSH</a>
         <a href="/ssh/sudo" class="tab">Sudo (actividad)</a>
         <span class="tab tab-active">Alertas sudo</span>
       </div>
     </header>
+
+    <div class="activity-toolbar">
+      <div class="activity-toolbar__group">
+        <label class="activity-toolbar__label">Ventana (min)</label>
+        <input
+          v-model.number="windowMinutes"
+          class="activity-toolbar__input"
+          type="number"
+          min="5"
+          max="10080"
+        />
+        <button class="btn-secondary" type="button" @click="refreshData()">
+          Refrescar ahora
+        </button>
+        <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
+      </div>
+
+      <div class="activity-toolbar__group">
+        <label class="activity-toolbar__label">Auto-refresco</label>
+        <select v-model.number="selectedInterval" class="activity-toolbar__input">
+          <option v-for="opt in intervalOptions" :key="opt" :value="opt">
+            Cada {{ opt }}s
+          </option>
+        </select>
+        <label class="activity-toolbar__toggle">
+          <input type="checkbox" v-model="autoRefreshEnabled" />
+          <span>Activado</span>
+        </label>
+      </div>
+    </div>
 
     <!-- Estado: cargando -->
     <section v-if="loading" class="section--loading">
@@ -79,7 +110,12 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(a, idx) in alerts" :key="idx">
+              <tr
+                v-for="(a, idx) in alerts"
+                :key="idx"
+                class="row--clickable"
+                @click="openDetail(a)"
+              >
                 <td>{{ formatTs(a.ts || a.timestamp || a.time || "") }}</td>
                 <td>{{ a.hostname || a.host || "-" }}</td>
                 <td>{{ a.username || a.user || "-" }}</td>
@@ -93,19 +129,35 @@
         </div>
       </section>
     </section>
+
+    <EventDetailDrawer
+      v-model="showDetail"
+      title="Detalle alerta sudo"
+      subtitle="Evento enviado por /api/v1/sudo_alerts"
+      :event="detailEvent"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api } from "../../../services/api";
 import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
+import EventDetailDrawer from "../../../components/shared/EventDetailDrawer.vue";
 
 const loading = ref(true);
 const error = ref<string | null>(null);
-const windowMinutes = ref<number | null>(null);
+const windowMinutes = ref<number>(240);
 const alerts = ref<any[]>([]);
+const lastUpdated = ref<Date | null>(null);
+const detailEvent = ref<any | null>(null);
+const showDetail = ref(false);
+
+const intervalOptions = [5, 10, 30, 60];
+const selectedInterval = ref<number>(30);
+const autoRefreshEnabled = ref<boolean>(true);
+let refreshHandle: number | null = null;
 
 // por ahora fijo; luego configurable
 const WINDOW_MINUTES = 240;
@@ -117,6 +169,11 @@ const distinctUsers = computed(() => {
     if (u) set.add(u);
   }
   return set.size;
+});
+
+const lastUpdatedLabel = computed(() => {
+  if (!lastUpdated.value) return "—";
+  return lastUpdated.value.toLocaleTimeString();
 });
 
 const lastAlertTsDisplay = computed(() => {
@@ -147,7 +204,7 @@ async function loadData() {
 
   try {
     const res = await api.get<any>("/sudo_alerts", {
-      minutes: WINDOW_MINUTES,
+      minutes: windowMinutes.value || WINDOW_MINUTES,
     });
 
     if (typeof res?.window_minutes === "number") {
@@ -164,15 +221,121 @@ async function loadData() {
       (Array.isArray(res) ? res : []);
 
     alerts.value = Array.isArray(rawAlerts) ? rawAlerts : [];
+    lastUpdated.value = new Date(res?.generated_at ?? Date.now());
   } catch (e: any) {
     error.value = e?.message ?? String(e);
   } finally {
     loading.value = false;
-    if (windowMinutes.value === null) windowMinutes.value = WINDOW_MINUTES;
+    if (!windowMinutes.value) windowMinutes.value = WINDOW_MINUTES;
   }
 }
 
+async function refreshData() {
+  await loadData();
+}
+
+function openDetail(event: any) {
+  detailEvent.value = event;
+  showDetail.value = true;
+}
+
+function clearAutoRefresh() {
+  if (refreshHandle) {
+    window.clearInterval(refreshHandle);
+    refreshHandle = null;
+  }
+}
+
+function setupAutoRefresh() {
+  clearAutoRefresh();
+  if (!autoRefreshEnabled.value) return;
+
+  refreshHandle = window.setInterval(() => {
+    void refreshData();
+  }, selectedInterval.value * 1000);
+}
+
+watch([selectedInterval, autoRefreshEnabled], () => {
+  setupAutoRefresh();
+});
+
+watch(windowMinutes, () => {
+  void refreshData();
+});
+
 onMounted(() => {
-  void loadData();
+  void refreshData();
+  setupAutoRefresh();
+});
+
+onBeforeUnmount(() => {
+  clearAutoRefresh();
 });
 </script>
+
+<style scoped>
+.row--clickable {
+  cursor: pointer;
+}
+
+.activity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.activity-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.activity-toolbar__label {
+  font-size: 0.82rem;
+  color: #cbd5e1;
+}
+
+.activity-toolbar__input {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  color: #e2e8f0;
+  min-width: 90px;
+}
+
+.activity-toolbar__hint {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.activity-toolbar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: #e2e8f0;
+}
+
+.btn-secondary {
+  border-radius: 9999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.9);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.btn-secondary--active {
+  background: linear-gradient(90deg, #2563eb, #4f46e5);
+  border-color: transparent;
+}
+</style>

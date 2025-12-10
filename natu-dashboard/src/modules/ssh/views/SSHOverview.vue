@@ -7,41 +7,70 @@
       </p>
       <div class="tabs">
         <span class="tab tab-active">SSH (resumen)</span>
+        <a href="/ssh/activity" class="tab">SSH (actividad)</a>
         <a href="/ssh/alerts" class="tab">Alertas SSH</a>
         <a href="/ssh/sudo" class="tab">Sudo (actividad)</a>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
       </div>
     </header>
 
-    <!-- Estado: cargando resumen -->
-    <section v-if="loadingSummary" class="section--loading">
-      <LoadingSpinner /> Cargando resumen de SSH...
-    </section>
+    <section class="page">
+      <div class="activity-toolbar">
+        <div class="activity-toolbar__group">
+          <label class="activity-toolbar__label">Ventana (min)</label>
+          <input
+            v-model.number="selectedWindow"
+            class="activity-toolbar__input"
+            type="number"
+            min="5"
+            max="10080"
+          />
+          <div class="quick-window">
+            <span class="window-selector__label">Rápidos:</span>
+            <button
+              v-for="m in windowOptions"
+              :key="m"
+              type="button"
+              class="window-selector__btn"
+              :class="{ 'window-selector__btn--active': selectedWindow === m }"
+              @click="onChangeWindow(m)"
+            >
+              <span v-if="m >= 1440">{{ m / 1440 }} día(s)</span>
+              <span v-else>{{ m }} min</span>
+            </button>
+          </div>
+          <button class="btn-secondary" type="button" @click="refreshData(true)">
+            Refrescar ahora
+          </button>
+          <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
+        </div>
 
-    <!-- Estado: error resumen -->
-    <section v-else-if="errorSummary" class="section--error">
-      Error al cargar resumen de SSH: {{ errorSummary }}
-    </section>
-
-    <!-- Datos OK -->
-    <section v-else class="page">
-      <!-- Selector de ventana -->
-      <div class="window-selector">
-        <span class="window-selector__label">Ventana:</span>
-        <button
-          v-for="m in windowOptions"
-          :key="m"
-          type="button"
-          class="window-selector__btn"
-          :class="{
-            'window-selector__btn--active': selectedWindow === m
-          }"
-          @click="onChangeWindow(m)"
-        >
-          <span v-if="m >= 1440">{{ m / 1440 }} día(s)</span>
-          <span v-else>{{ m }} min</span>
-        </button>
+        <div class="activity-toolbar__group">
+          <label class="activity-toolbar__label">Auto-refresco</label>
+          <select v-model.number="selectedInterval" class="activity-toolbar__input">
+            <option v-for="opt in intervalOptions" :key="opt" :value="opt">
+              Cada {{ opt }}s
+            </option>
+          </select>
+          <label class="activity-toolbar__toggle">
+            <input type="checkbox" v-model="autoRefreshEnabled" />
+            <span>Activado</span>
+          </label>
+        </div>
       </div>
+
+      <!-- Estado: cargando resumen -->
+      <section v-if="loadingSummary" class="section--loading">
+        <LoadingSpinner /> Cargando resumen de SSH...
+      </section>
+
+      <!-- Estado: error resumen -->
+      <section v-else-if="errorSummary" class="section--error">
+        Error al cargar resumen de SSH: {{ errorSummary }}
+      </section>
+
+      <!-- Datos OK -->
+      <section v-else class="page">
 
       <!-- Cards resumen -->
       <div class="stats-grid">
@@ -82,15 +111,17 @@
                 <th>Failed</th>
               </tr>
             </thead>
-            <tbody>
-              <tr
-                v-for="(ip, idx) in topIps"
-                :key="ip.remote_ip || ip.ip || idx"
-              >
-                <td>{{ idx + 1 }}</td>
-                <td>{{ ip.remote_ip || ip.ip || "-" }}</td>
-                <td>{{ ip.failed ?? ip.failed_count ?? "-" }}</td>
-              </tr>
+              <tbody>
+                <tr
+                  v-for="(ip, idx) in topIps"
+                  :key="ip.remote_ip || ip.ip || idx"
+                  class="row--clickable"
+                  @click="openDetail('IP con intentos fallidos', ip, 'Top IPs (failed)')"
+                >
+                  <td>{{ idx + 1 }}</td>
+                  <td>{{ ip.remote_ip || ip.ip || "-" }}</td>
+                  <td>{{ ip.failed ?? ip.failed_count ?? "-" }}</td>
+                </tr>
               <tr v-if="topIps.length === 0">
                 <td colspan="3" style="font-size: 0.78rem; color: #9ca3af;">
                   No se han registrado intentos fallidos en la ventana seleccionada.
@@ -111,14 +142,16 @@
                 <th>Success</th>
               </tr>
             </thead>
-            <tbody>
-              <tr
-                v-for="(u, idx) in topUsers"
-                :key="u.username + '-' + idx"
-              >
-                <td>{{ idx + 1 }}</td>
-                <td>{{ u.username }}</td>
-                <td>{{ u.failed ?? 0 }}</td>
+              <tbody>
+                <tr
+                  v-for="(u, idx) in topUsers"
+                  :key="u.username + '-' + idx"
+                  class="row--clickable"
+                  @click="openDetail('Top usuario SSH', u, 'Top usuarios (failed/success)')"
+                >
+                  <td>{{ idx + 1 }}</td>
+                  <td>{{ u.username }}</td>
+                  <td>{{ u.failed ?? 0 }}</td>
                 <td>{{ u.success ?? 0 }}</td>
               </tr>
               <tr v-if="topUsers.length === 0">
@@ -203,6 +236,7 @@
         </div>
       </section>
     </section>
+    </section>
 
     <EventDetailDrawer
       v-model="showDetail"
@@ -214,7 +248,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api } from "../../../services/api";
 import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
@@ -225,6 +259,7 @@ const WINDOW_MINUTES = 240;
 // opciones de ventana (minutos)
 const windowOptions = [60, 240, 1440];
 const MAX_TIMELINE_IPS = 5;
+const intervalOptions = [5, 10, 30, 60];
 
 // estado resumen
 const loadingSummary = ref(true);
@@ -236,6 +271,7 @@ const successTotal = ref<number>(0);
 const hostsCount = ref<number>(0);
 const topIps = ref<any[]>([]);
 const topUsers = ref<any[]>([]);
+const lastUpdated = ref<Date | null>(null);
 
 // timeline agregado
 const loadingTimeline = ref(false);
@@ -248,9 +284,19 @@ const detailEvent = ref<any | null>(null);
 const detailTitle = ref("Detalle evento SSH");
 const detailSubtitle = ref("Timeline SSH (top IPs)");
 
+// auto refresh
+const selectedInterval = ref<number>(30);
+const autoRefreshEnabled = ref<boolean>(true);
+let refreshHandle: number | null = null;
+
 const windowLabel = computed(
   () => `${windowMinutes.value ?? selectedWindow.value} min`,
 );
+
+const lastUpdatedLabel = computed(() => {
+  if (!lastUpdated.value) return "—";
+  return lastUpdated.value.toLocaleTimeString();
+});
 
 function formatTs(ts: string): string {
   const d = new Date(ts);
@@ -320,8 +366,7 @@ async function loadSummary() {
       (Array.isArray(res) ? res : []);
     topUsers.value = Array.isArray(users) ? users : [];
 
-    // timeline se recalcula cada vez que cambia el resumen
-    await loadAggregatedTimeline();
+    lastUpdated.value = new Date(res?.generated_at ?? Date.now());
   } catch (e: any) {
     errorSummary.value = e?.message ?? String(e);
   } finally {
@@ -397,24 +442,129 @@ async function loadAggregatedTimeline() {
 async function onChangeWindow(minutes: number) {
   if (selectedWindow.value === minutes) return;
   selectedWindow.value = minutes;
-  await loadSummary();
 }
 
-function openDetail(title: string, evt: any) {
+async function refreshData(refreshTimeline: boolean) {
+  await loadSummary();
+  if (refreshTimeline) {
+    await loadAggregatedTimeline();
+  }
+}
+
+function openDetail(title: string, evt: any, subtitle?: string) {
   detailTitle.value = title;
-  detailSubtitle.value = "Timeline SSH (top IPs agregadas)";
+  detailSubtitle.value =
+    subtitle ?? "Timeline SSH (top IPs agregadas)";
   detailEvent.value = evt;
   showDetail.value = true;
 }
 
+watch(selectedWindow, () => {
+  void refreshData(true);
+});
+
+function clearAutoRefresh() {
+  if (refreshHandle) {
+    window.clearInterval(refreshHandle);
+    refreshHandle = null;
+  }
+}
+
+function setupAutoRefresh() {
+  clearAutoRefresh();
+  if (!autoRefreshEnabled.value) return;
+
+  refreshHandle = window.setInterval(() => {
+    void refreshData(true);
+  }, selectedInterval.value * 1000);
+}
+
+watch([selectedInterval, autoRefreshEnabled], () => {
+  setupAutoRefresh();
+});
+
 onMounted(() => {
-  void loadSummary();
+  void refreshData(true);
+  setupAutoRefresh();
+});
+
+onBeforeUnmount(() => {
+  clearAutoRefresh();
 });
 </script>
 
 <style scoped>
 .row--clickable {
   cursor: pointer;
+}
+
+/* Toolbar reutilizada de SSH (actividad) */
+.activity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.activity-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.activity-toolbar__label {
+  font-size: 0.82rem;
+  color: #cbd5e1;
+}
+
+.activity-toolbar__input {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  color: #e2e8f0;
+  min-width: 90px;
+}
+
+.activity-toolbar__hint {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.activity-toolbar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: #e2e8f0;
+}
+
+.btn-secondary {
+  border-radius: 9999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.9);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.btn-secondary--active {
+  background: linear-gradient(90deg, #2563eb, #4f46e5);
+  border-color: transparent;
+}
+
+.quick-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
 }
 
 /* Selector de ventana */
