@@ -661,7 +661,7 @@ onBeforeUnmount(() => {
 
 .hero-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: 280px minmax(300px, 360px) minmax(380px, 1fr);
   gap: 1rem;
   margin-bottom: 1rem;
   align-items: stretch;
@@ -687,12 +687,15 @@ onBeforeUnmount(() => {
 }
 
 .legend-card {
-  grid-row: span 2;
+  grid-column: 1;
+  grid-row: 1 / span 2;
   align-self: start;
 }
 
 .contribution-card {
-  align-self: start;
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: stretch;
 }
 
 .legend-list {
@@ -727,6 +730,8 @@ onBeforeUnmount(() => {
 }
 
 .gauge-card {
+  grid-column: 2;
+  grid-row: 1 / span 2;
   justify-items: center;
   text-align: center;
 }
@@ -764,6 +769,10 @@ onBeforeUnmount(() => {
 .gauge__score {
   font-size: 2rem;
   font-weight: 800;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .gauge__label {
@@ -774,8 +783,8 @@ onBeforeUnmount(() => {
 .gauge-card__footer {
   width: 100%;
   border-top: 1px solid #1f2937;
-  padding-top: 0.75rem;
-  margin-top: 0.25rem;
+  padding-top: 1rem;
+  margin-top: 0.75rem;
 }
 
 .thermo-card__legend {
@@ -784,6 +793,7 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: center;
   gap: 0.35rem;
+  margin-top: 0.35rem;
 }
 
 .summary-bar {
@@ -889,6 +899,13 @@ onBeforeUnmount(() => {
 
   .hero-grid {
     grid-template-columns: 1fr;
+  }
+
+  .legend-card,
+  .gauge-card,
+  .contribution-card {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .summary-bar {
