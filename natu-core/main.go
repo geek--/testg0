@@ -255,6 +255,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/events/batch", srv.handleBatchEvents)
 	mux.HandleFunc("/api/v1/ssh_summary", srv.handleSSHSummary)
+	mux.HandleFunc("/api/v1/ssh_activity", srv.handleSSHActivity)
 	mux.HandleFunc("/api/v1/ssh_alerts", srv.handleSSHAlerts)
 	mux.HandleFunc("/api/v1/ssh_alerts/", srv.handleSSHAlerts)
 	mux.HandleFunc("/api/v1/ssh_suspicious_logins", srv.handleSSHSuspiciousLogins)
