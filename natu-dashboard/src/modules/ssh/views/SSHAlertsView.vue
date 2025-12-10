@@ -8,6 +8,7 @@
       </p>
       <div class="tabs">
         <a href="/ssh" class="tab">SSH (resumen)</a>
+        <a href="/ssh/activity" class="tab">SSH (actividad)</a>
         <span class="tab tab-active">Alertas SSH</span>
         <a href="/ssh/sudo" class="tab">Sudo (actividad)</a>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
