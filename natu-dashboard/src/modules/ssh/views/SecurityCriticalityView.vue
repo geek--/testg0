@@ -758,12 +758,12 @@ onBeforeUnmount(() => {
 .gauge__center {
   width: 100%;
   height: 100%;
-  border-radius: 50%;
-  background: #0b1220;
+  /* border-radius: 50%; */
+  /* background: #0b1220; */
   display: grid;
   place-items: center;
   gap: 0.15rem;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  /* box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3); */
 }
 
 .gauge__score {
@@ -784,7 +784,7 @@ onBeforeUnmount(() => {
   width: 100%;
   border-top: 1px solid #1f2937;
   padding-top: 1rem;
-  margin-top: 0.75rem;
+  margin-top: 5rem;
 }
 
 .thermo-card__legend {
