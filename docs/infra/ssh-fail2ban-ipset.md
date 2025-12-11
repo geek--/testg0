@@ -8,11 +8,11 @@ Este documento define la configuración inicial para endurecer el acceso SSH en 
 - Usuario con privilegios de `sudo` para aplicar las reglas.
 
 ## 1. Conjunto ipset persistente
-1. Crear un set para los bloqueos SSH y hacerlo persistente (la ruta de `ipset` en isov3 es `/usr/sbin/ipset`):
+1. Crear un set para los bloqueos SSH y hacerlo persistente:
    ```bash
-   sudo /usr/sbin/ipset create ssh-banned hash:ip -exist
+   sudo ipset create ssh-banned hash:ip timeout 86400 -exist
    sudo mkdir -p /etc/ipset.d
-   sudo sh -c '/usr/sbin/ipset save ssh-banned > /etc/ipset.d/ssh-banned.conf'
+   sudo sh -c 'ipset save ssh-banned > /etc/ipset.d/ssh-banned.conf'
    ```
 2. Asegurar restauración en el arranque (systemd):
    ```ini
@@ -24,8 +24,8 @@ Este documento define la configuración inicial para endurecer el acceso SSH en 
 
    [Service]
    Type=oneshot
-   ExecStart=/usr/sbin/ipset restore < /etc/ipset.d/ssh-banned.conf
-   ExecReload=/usr/sbin/ipset restore < /etc/ipset.d/ssh-banned.conf
+   ExecStart=/sbin/ipset restore < /etc/ipset.d/ssh-banned.conf
+   ExecReload=/sbin/ipset restore < /etc/ipset.d/ssh-banned.conf
    RemainAfterExit=yes
 
    [Install]
@@ -38,15 +38,15 @@ Crear una acción específica que inserte y quite IPs del set `ssh-banned`:
 ```ini
 # /etc/fail2ban/action.d/ipset-ssh-ban.conf
 [Definition]
-actionstart = /usr/sbin/ipset create ssh-banned hash:ip -exist
-actionstop  = /usr/sbin/ipset flush ssh-banned
-actioncheck = /usr/sbin/ipset list ssh-banned
+actionstart = ipset create ssh-banned hash:ip timeout 86400 -exist
+actionstop  = ipset flush ssh-banned
+actioncheck = ipset list ssh-banned
 
-# Solo Fail2ban controla los tiempos: se pasa <bantime> al añadir la IP
-actionban   = /usr/sbin/ipset add ssh-banned <ip> timeout <bantime> -exist
+# Añade la IP a ipset con timeout; evita duplicados
+actionban   = ipset add ssh-banned <ip> timeout <bantime> -exist
 
 # Elimina la IP cuando expire/sea desbaneada
-actionunban = /usr/sbin/ipset del ssh-banned <ip>
+actionunban = ipset del ssh-banned <ip>
 
 [Init]
 # Usar el bantime efectivo de la jail
@@ -75,20 +75,6 @@ Si la distribución usa `/var/log/secure`, cambia `logpath` en consecuencia.
 - Verificar que la jail está activa y que usa ipset: `sudo fail2ban-client status sshd`.
 - Consultar las IP baneadas: `sudo ipset list ssh-banned`.
 - Desbanear manualmente (si es necesario): `sudo fail2ban-client set sshd unbanip <IP>`.
-
-### Integración con UFW para aplicar el set
-Agregar al inicio de las reglas de UFW (antes de los `ufw-before-input` estándar) una regla que bloquee las IP del set:
-```bash
-sudo sh -c 'cat > /etc/ufw/before.rules.d/10-ssh-banned.conf <<"EOF"'
-*filter
-:ufw-ssh-banned - [0:0]
--A ufw-ssh-banned -m set --match-set ssh-banned src -j DROP
--A INPUT -j ufw-ssh-banned
-COMMIT
-EOF
-sudo ufw reload
-```
-Esto garantiza que el set `ssh-banned` se aplique en el cortafuegos activo (UFW).
 
 ## 5. Consideraciones para "Reactividad"
 - Fail2ban registra cada baneo/desbaneo en `/var/log/fail2ban.log`; ese archivo será la fuente recomendada para consumir eventos en la futura API/Tab "Reactividad".
