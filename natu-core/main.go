@@ -205,6 +205,37 @@ type SudoAlertUpdateRequest struct {
 }
 
 // ----------------------------
+// SSH bans (Fail2ban/ipset)
+// ----------------------------
+
+type SSHBan struct {
+	Hostname string     `json:"hostname"`
+	IP       string     `json:"ip"`
+	Jail     string     `json:"jail"`
+	BannedAt *time.Time `json:"banned_at,omitempty"`
+	Reason   string     `json:"reason,omitempty"`
+	Source   string     `json:"source,omitempty"`
+	SyncedAt time.Time  `json:"synced_at"`
+}
+
+type SSHBanSyncRequest struct {
+	AgentSecret string `json:"agent_secret"`
+	Bans        []struct {
+		IP       string     `json:"ip"`
+		Jail     string     `json:"jail"`
+		BannedAt *time.Time `json:"banned_at,omitempty"`
+		Reason   string     `json:"reason,omitempty"`
+		Source   string     `json:"source,omitempty"`
+	} `json:"bans"`
+}
+
+type SSHBanResponse struct {
+	WindowMinutes int       `json:"window_minutes"`
+	GeneratedAt   time.Time `json:"generated_at"`
+	Bans          []SSHBan  `json:"bans"`
+}
+
+// ----------------------------
 // Constantes de reglas
 // ----------------------------
 
@@ -254,6 +285,10 @@ func main() {
 	}
 	defer pool.Close()
 
+	if err := ensureBanTable(ctx, pool); err != nil {
+		log.Fatalf("Error asegurando tabla ssh_bans_state: %v", err)
+	}
+
 	srv := &Server{db: pool}
 
 	mux := http.NewServeMux()
@@ -268,6 +303,7 @@ func main() {
 	mux.HandleFunc("/api/v1/sudo_timeline", srv.handleSudoTimeline)
 	mux.HandleFunc("/api/v1/sudo_alerts", srv.handleSudoAlerts)
 	mux.HandleFunc("/api/v1/sudo_alerts/", srv.handleSudoAlerts)
+	mux.HandleFunc("/api/v1/ssh_bans", srv.handleSSHBans)
 
 	// Workers
 	srv.startSSHAlertWorker(SSHAlertWindowMinutes, SSHAlertFailedThreshold)
@@ -280,6 +316,22 @@ func main() {
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("Error en servidor HTTP: %v", err)
 	}
+}
+
+func ensureBanTable(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, `
+        CREATE TABLE IF NOT EXISTS ssh_bans_state (
+            agent_id uuid REFERENCES agents(id) ON DELETE CASCADE,
+            ip text NOT NULL,
+            jail text NOT NULL DEFAULT 'sshd',
+            banned_at timestamptz,
+            reason text,
+            source text,
+            synced_at timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (agent_id, ip, jail)
+        );
+    `)
+	return err
 }
 
 // ----------------------------------------------------
@@ -356,6 +408,148 @@ func (s *Server) handleBatchEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+// ----------------------------------------------------
+// Bans SSH (Fail2ban/ipset)
+// ----------------------------------------------------
+
+func (s *Server) handleSSHBans(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		s.handlePostSSHBans(w, r)
+	case http.MethodGet:
+		s.handleGetSSHBans(w, r)
+	default:
+		http.Error(w, "solo GET/POST", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handlePostSSHBans(w http.ResponseWriter, r *http.Request) {
+	var req SSHBanSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "JSON inválido", http.StatusBadRequest)
+		return
+	}
+
+	if req.AgentSecret == "" {
+		http.Error(w, "agent_secret requerido", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	var agentID string
+	err := s.db.QueryRow(ctx, `
+        SELECT id::text
+        FROM agents
+        WHERE secret = $1
+    `, req.AgentSecret).Scan(&agentID)
+	if err != nil {
+		http.Error(w, "agente no encontrado o secret inválido", http.StatusUnauthorized)
+		return
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		http.Error(w, "error iniciando transacción", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM ssh_bans_state WHERE agent_id = $1`, agentID); err != nil {
+		http.Error(w, "error limpiando bans previos", http.StatusInternalServerError)
+		return
+	}
+
+	for _, ban := range req.Bans {
+		if ban.IP == "" {
+			continue
+		}
+
+		jail := ban.Jail
+		if jail == "" {
+			jail = "sshd"
+		}
+
+		_, err := tx.Exec(ctx, `
+            INSERT INTO ssh_bans_state (agent_id, ip, jail, banned_at, reason, source, synced_at)
+            VALUES ($1, $2, $3, $4, $5, $6, now())
+        `, agentID, ban.IP, jail, ban.BannedAt, ban.Reason, ban.Source)
+		if err != nil {
+			http.Error(w, "error guardando bans", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		http.Error(w, "error commit bans", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+func (s *Server) handleGetSSHBans(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	minStr := q.Get("minutes")
+	windowMinutes := 1440
+	if minStr != "" {
+		if v, err := strconv.Atoi(minStr); err == nil && v > 0 && v <= 10080 {
+			windowMinutes = v
+		}
+	}
+
+	ctx := r.Context()
+	now := time.Now().UTC()
+
+	rows, err := s.db.Query(ctx, `
+        SELECT b.ip, b.jail, b.banned_at, b.reason, b.source, b.synced_at, a.hostname
+        FROM ssh_bans_state b
+        JOIN agents a ON b.agent_id = a.id
+        WHERE b.synced_at >= now() - ($1::int || ' minutes')::interval
+        ORDER BY COALESCE(b.banned_at, b.synced_at) DESC;
+    `, windowMinutes)
+	if err != nil {
+		http.Error(w, "error consultando bans", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var bans []SSHBan
+	for rows.Next() {
+		var b SSHBan
+		if err := rows.Scan(&b.IP, &b.Jail, &b.BannedAt, &b.Reason, &b.Source, &b.SyncedAt, &b.Hostname); err != nil {
+			http.Error(w, "error leyendo bans", http.StatusInternalServerError)
+			return
+		}
+		bans = append(bans, b)
+	}
+
+	if rows.Err() != nil {
+		http.Error(w, "error final leyendo bans", http.StatusInternalServerError)
+		return
+	}
+
+	if bans == nil {
+		bans = []SSHBan{}
+	}
+
+	resp := SSHBanResponse{
+		WindowMinutes: windowMinutes,
+		GeneratedAt:   now,
+		Bans:          bans,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(resp); err != nil {
+		http.Error(w, "error serializando respuesta", http.StatusInternalServerError)
+		return
+	}
 }
 
 // ----------------------------------------------------
