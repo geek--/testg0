@@ -99,3 +99,30 @@ UFW no carga snippets en `before.rules.d`. Añade la regla directamente en `/etc
 - Fail2ban registra cada baneo/desbaneo en `/var/log/fail2ban.log`; ese archivo será la fuente recomendada para consumir eventos en la futura API/Tab "Reactividad".
 - Si más adelante se desea incluir Nginx/ModSecurity, se puede agregar otra jail apuntando al log de ModSecurity (`/var/log/modsec_audit.log`) y reutilizar la misma acción `ipset-ssh-ban` para unificar los sets bloqueados.
 - Mantener separados los sets (`ssh-banned`, `http-banned`, etc.) facilitará mostrar estadísticas por módulo en la UI.
+
+## 6. Reactividad: consumo de eventos y API
+### 6.1 Estado actual: listo para consumir
+- Con `fail2ban-client status sshd` ya confirmamos que la jail está activa y **bannea** (ejemplo: `172.236.228.208`) y que el set `ssh-banned` contiene la IP.
+- El archivo `/var/log/fail2ban.log` ya refleja esos eventos; puede ser leído tanto por un agente (p. ej. `natu-agente`) como por la futura API.
+
+### 6.2 Formato y parseo mínimo del log
+Los eventos relevantes llegan como líneas similares a:
+```
+2024-05-27 15:31:42,123 fail2ban.actions        [1]: NOTICE  [sshd] Ban 172.236.228.208
+2024-05-27 15:35:42,321 fail2ban.actions        [1]: NOTICE  [sshd] Unban 172.236.228.208
+```
+Campos clave a extraer:
+- `timestamp` (UTC por defecto).
+- `jail` (entre corchetes, aquí `sshd`).
+- `action` (`Ban`/`Unban`).
+- `ip` (último campo).
+
+### 6.3 Ingesta sugerida para el Tab "Reactividad"
+1. **Lectura**: `natu-agente` puede hacer `tail -F /var/log/fail2ban.log` y parsear las líneas anteriores.
+2. **Envío**: publicar cada evento (ban/unban) a la API interna con el payload `{timestamp, jail, action, ip, source="fail2ban"}`.
+3. **Persistencia/UI**: el Tab mostrará la lista cronológica y, opcionalmente, un contador por jail.
+4. **Error handling**: si el log rota, `tail -F` sigue el nuevo archivo; para mayor robustez se puede leer vía `journalctl -u fail2ban -f -o short-iso`.
+
+### 6.4 Acceso y permisos
+- Asegura que el servicio/usuario que ejecute `natu-agente` tenga permisos de lectura sobre `/var/log/fail2ban.log` (o sobre el journal si se usa `journalctl`).
+- No es necesario exponer comandos privilegiados: el log es de solo lectura y el set `ssh-banned` ya se aplica por Fail2ban/UFW.
