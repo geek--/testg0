@@ -26,6 +26,7 @@ type Event struct {
 
 type BatchRequest struct {
 	AgentSecret string  `json:"agent_secret"`
+	Hostname    string  `json:"hostname,omitempty"`
 	Events      []Event `json:"events"`
 }
 
@@ -39,6 +40,7 @@ type SSHBan struct {
 
 type SSHBanSyncRequest struct {
 	AgentSecret string   `json:"agent_secret"`
+	Hostname    string   `json:"hostname"`
 	Bans        []SSHBan `json:"bans"`
 }
 
@@ -71,6 +73,11 @@ func main() {
 
 	log.Printf("natu-agent empezando. Enviando a %s", serverURL)
 
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+
 	// Arranca el endpoint local para exponer los bans actuales
 	go startHTTPServer()
 
@@ -88,7 +95,7 @@ func main() {
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	// Sincronización periódica de bans activos hacia natu-core
-	go startBanSyncLoop(client, serverURL, secret)
+	go startBanSyncLoop(client, serverURL, secret, hostname)
 
 	for line := range t.Lines {
 		if line == nil {
@@ -101,6 +108,7 @@ func main() {
 
 		req := BatchRequest{
 			AgentSecret: secret,
+			Hostname:    hostname,
 			Events:      []Event{*ev},
 		}
 
@@ -172,7 +180,7 @@ func handleLocalBans(w http.ResponseWriter, r *http.Request) {
 	_ = enc.Encode(resp)
 }
 
-func startBanSyncLoop(client *http.Client, serverURL, secret string) {
+func startBanSyncLoop(client *http.Client, serverURL, secret, hostname string) {
 	syncEvery := 60 * time.Second
 	if v := os.Getenv("NATU_AGENT_BAN_SYNC_SECONDS"); v != "" {
 		if iv, err := strconv.Atoi(v); err == nil && iv >= 15 {
@@ -187,7 +195,7 @@ func startBanSyncLoop(client *http.Client, serverURL, secret string) {
 			return
 		}
 
-		payload := SSHBanSyncRequest{AgentSecret: secret, Bans: bans}
+		payload := SSHBanSyncRequest{AgentSecret: secret, Hostname: hostname, Bans: bans}
 		b, err := json.Marshal(payload)
 		if err != nil {
 			log.Printf("error serializando bans: %v", err)

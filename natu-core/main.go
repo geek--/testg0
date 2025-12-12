@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -27,6 +28,7 @@ type Event struct {
 
 type BatchRequest struct {
 	AgentSecret string  `json:"agent_secret"`
+	Hostname    string  `json:"hostname,omitempty"`
 	Events      []Event `json:"events"`
 }
 
@@ -220,6 +222,7 @@ type SSHBan struct {
 
 type SSHBanSyncRequest struct {
 	AgentSecret string `json:"agent_secret"`
+	Hostname    string `json:"hostname"`
 	Bans        []struct {
 		IP       string     `json:"ip"`
 		Jail     string     `json:"jail"`
@@ -334,6 +337,38 @@ func ensureBanTable(ctx context.Context, pool *pgxpool.Pool) error {
 	return err
 }
 
+func (s *Server) ensureAgent(ctx context.Context, secret, hostname string) (string, error) {
+	var agentID string
+	err := s.db.QueryRow(ctx, `
+        SELECT id::text
+        FROM agents
+        WHERE secret = $1
+    `, secret).Scan(&agentID)
+	if err == nil {
+		_, _ = s.db.Exec(ctx, `
+            UPDATE agents
+            SET last_seen = now(), hostname = COALESCE(NULLIF($2, ''), hostname)
+            WHERE id = $3
+        `, hostname, agentID)
+		return agentID, nil
+	}
+
+	if hostname == "" {
+		return "", fmt.Errorf("agente no encontrado y hostname no provisto")
+	}
+
+	err = s.db.QueryRow(ctx, `
+        INSERT INTO agents (hostname, secret)
+        VALUES ($1, $2)
+        RETURNING id::text
+    `, hostname, secret).Scan(&agentID)
+	if err != nil {
+		return "", err
+	}
+
+	return agentID, nil
+}
+
 // ----------------------------------------------------
 // Ingesta de eventos (batch)
 // ----------------------------------------------------
@@ -356,19 +391,12 @@ func (s *Server) handleBatchEvents(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	var agentID string
-	err := s.db.QueryRow(ctx, `
-        SELECT id::text
-        FROM agents
-        WHERE secret = $1
-    `, req.AgentSecret).Scan(&agentID)
+	agentID, err := s.ensureAgent(ctx, req.AgentSecret, req.Hostname)
 	if err != nil {
-		log.Printf("❌ Error buscando agente: secret='%s', err=%v", req.AgentSecret, err)
+		log.Printf("❌ Error asegurando agente: secret='%s', err=%v", req.AgentSecret, err)
 		http.Error(w, "agente no encontrado o secret inválido", http.StatusUnauthorized)
 		return
 	}
-
-	_, _ = s.db.Exec(ctx, `UPDATE agents SET last_seen = now() WHERE id = $1`, agentID)
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -439,12 +467,7 @@ func (s *Server) handlePostSSHBans(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	var agentID string
-	err := s.db.QueryRow(ctx, `
-        SELECT id::text
-        FROM agents
-        WHERE secret = $1
-    `, req.AgentSecret).Scan(&agentID)
+	agentID, err := s.ensureAgent(ctx, req.AgentSecret, req.Hostname)
 	if err != nil {
 		http.Error(w, "agente no encontrado o secret inválido", http.StatusUnauthorized)
 		return
