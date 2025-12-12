@@ -1,18 +1,18 @@
 <template>
   <div class="page">
     <header class="page-header">
-      <h1 class="page-header__title">Sudo · Resumen</h1>
+      <h1 class="page-header__title">Sudo · Actividad reciente</h1>
       <p class="page-header__subtitle">
-        Visión general de ejecuciones sudo, usuarios y comandos elevados en el
-        servidor isov3.
+        Ejecuciones de sudo, usuarios que lo utilizan y comandos elevando privilegios
+        en el servidor isov3.
       </p>
       <div class="tabs">
         <a href="/ssh" class="tab">SSH (resumen)</a>
         <a href="/ssh/activity" class="tab">SSH (actividad)</a>
         <a href="/ssh/alerts" class="tab">Alertas SSH</a>
         <a href="/ssh/reactividad" class="tab">Reactividad</a>
-        <span class="tab tab-active">Sudo (resumen)</span>
-        <a href="/ssh/sudo/activity" class="tab">Sudo (actividad)</a>
+        <a href="/ssh/sudo" class="tab">Sudo (resumen)</a>
+        <span class="tab tab-active">Sudo (actividad)</span>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
         <a href="/ssh/criticality" class="tab">Criticidad</a>
       </div>
@@ -59,15 +59,33 @@
       </p>
     </section>
 
-    <div class="filters-bar" style="margin-top: 0.5rem;">
-      <div class="filters-bar__group">
-        <label class="filters-bar__label">Actualizado</label>
-        <span class="filters-bar__hint">{{ lastUpdatedLabel }}</span>
-      </div>
-      <div class="filters-bar__actions">
-        <button class="btn-primary" type="button" @click="refreshData()">
-          Refrescar
+    <div class="activity-toolbar">
+      <div class="activity-toolbar__group">
+        <label class="activity-toolbar__label">Ventana (min)</label>
+        <input
+          v-model.number="windowMinutes"
+          class="activity-toolbar__input"
+          type="number"
+          min="5"
+          max="10080"
+        />
+        <button class="btn-secondary" type="button" @click="refreshData()">
+          Refrescar ahora
         </button>
+        <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
+      </div>
+
+      <div class="activity-toolbar__group">
+        <label class="activity-toolbar__label">Auto-refresco</label>
+        <select v-model.number="selectedInterval" class="activity-toolbar__input">
+          <option v-for="opt in intervalOptions" :key="opt" :value="opt">
+            Cada {{ opt }}s
+          </option>
+        </select>
+        <label class="activity-toolbar__toggle">
+          <input type="checkbox" v-model="autoRefreshEnabled" />
+          <span>Activado</span>
+        </label>
       </div>
     </div>
 
@@ -199,7 +217,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api } from "../../../services/api";
 import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
@@ -221,6 +239,11 @@ const showDetail = ref(false);
 const detailEvent = ref<any | null>(null);
 const detailTitle = ref("Detalle de ejecución sudo");
 const detailSubtitle = ref("Evento enviado por /api/v1/sudo_timeline");
+
+const intervalOptions = [5, 10, 30, 60];
+const selectedInterval = ref<number>(30);
+const autoRefreshEnabled = ref<boolean>(true);
+let refreshHandle: number | null = null;
 
 // por ahora fijo; luego configurable
 const WINDOW_MINUTES = 240;
@@ -338,8 +361,38 @@ function openDetail(
   detailTitle.value = title;
   showDetail.value = true;
 }
+
+function clearAutoRefresh() {
+  if (refreshHandle) {
+    window.clearInterval(refreshHandle);
+    refreshHandle = null;
+  }
+}
+
+function setupAutoRefresh() {
+  clearAutoRefresh();
+  if (!autoRefreshEnabled.value) return;
+
+  refreshHandle = window.setInterval(() => {
+    void refreshData();
+  }, selectedInterval.value * 1000);
+}
+
+watch([selectedInterval, autoRefreshEnabled], () => {
+  setupAutoRefresh();
+});
+
+watch(windowMinutes, () => {
+  void refreshData();
+});
+
 onMounted(() => {
   void refreshData();
+  setupAutoRefresh();
+});
+
+onBeforeUnmount(() => {
+  clearAutoRefresh();
 });
 </script>
 
