@@ -10,7 +10,9 @@
         <a href="/ssh" class="tab">SSH (resumen)</a>
         <span class="tab tab-active">SSH (actividad)</span>
         <a href="/ssh/alerts" class="tab">Alertas SSH</a>
-        <a href="/ssh/sudo" class="tab">Sudo (actividad)</a>
+        <a href="/ssh/reactividad" class="tab">Reactividad</a>
+        <a href="/ssh/sudo" class="tab">Sudo (resumen)</a>
+        <a href="/ssh/sudo/activity" class="tab">Sudo (actividad)</a>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
         <a href="/ssh/criticality" class="tab">Criticidad</a>
       </div>
@@ -27,15 +29,14 @@
             min="5"
             max="10080"
           />
-          <button class="btn-secondary" type="button" @click="refreshData(true)">
+          <button class="btn-primary" type="button" @click="refreshData(true)">
             Refrescar ahora
           </button>
-          <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
 
-        <div class="activity-toolbar__group">
+        <div class="activity-toolbar__group activity-toolbar__group--right">
           <label class="activity-toolbar__label">Auto-refresco</label>
-          <select v-model.number="selectedInterval" class="activity-toolbar__input">
+          <select v-model.number="selectedInterval" class="activity-toolbar__input activity-toolbar__input--select">
             <option v-for="opt in intervalOptions" :key="opt" :value="opt">
               Cada {{ opt }}s
             </option>
@@ -44,6 +45,7 @@
             <input type="checkbox" v-model="autoRefreshEnabled" />
             <span>Activado</span>
           </label>
+          <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
       </div>
 
@@ -347,17 +349,22 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
-  padding: 0.45rem 0.6rem;
+  padding: 0.65rem 0.85rem;
   border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 0.75rem;
-  background: rgba(15, 23, 42, 0.6);
+  border-radius: 0.9rem;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.82));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .activity-toolbar__group {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   flex-wrap: wrap;
+}
+
+.activity-toolbar__group--right {
+  margin-left: auto;
 }
 
 .activity-toolbar__label {
@@ -366,12 +373,16 @@ onBeforeUnmount(() => {
 }
 
 .activity-toolbar__input {
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  border-radius: 0.5rem;
-  padding: 0.3rem 0.5rem;
+  background: rgba(17, 24, 39, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.55rem;
+  padding: 0.38rem 0.6rem;
   color: #e2e8f0;
-  min-width: 90px;
+  min-width: 96px;
+}
+
+.activity-toolbar__input--select {
+  padding-right: 2.1rem;
 }
 
 .activity-toolbar__hint {
@@ -385,6 +396,24 @@ onBeforeUnmount(() => {
   gap: 0.35rem;
   font-size: 0.9rem;
   color: #e2e8f0;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.45rem;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.btn-primary {
+  border-radius: 0.65rem;
+  border: none;
+  padding: 0.42rem 0.9rem;
+  font-size: 0.86rem;
+  background: linear-gradient(90deg, #2563eb, #4f46e5);
+  color: #f9fafb;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.22);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.08);
 }
 
 .btn-secondary {
