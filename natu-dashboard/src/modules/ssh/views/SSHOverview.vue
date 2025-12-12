@@ -18,18 +18,25 @@
         </div>
       </header>
 
-      <div class="activity-toolbar activity-toolbar--padded">
+      <div class="activity-toolbar activity-toolbar--accent">
         <div class="activity-toolbar__group">
           <button class="btn-secondary" type="button" @click="refreshData(true)">
             Refrescar ahora
           </button>
           <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
-        <div class="filters-bar__actions">
-          <button class="btn-primary" type="button" @click="refreshData(true)">
-            Refrescar
-          </button>
-          <span class="filters-bar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
+
+        <div class="activity-toolbar__group activity-toolbar__group--compact">
+          <label class="activity-toolbar__label">Auto-refresco</label>
+          <select v-model.number="selectedInterval" class="activity-toolbar__input">
+            <option v-for="opt in intervalOptions" :key="opt" :value="opt">
+              Cada {{ opt }}s
+            </option>
+          </select>
+          <label class="activity-toolbar__toggle">
+            <input type="checkbox" v-model="autoRefreshEnabled" />
+            <span>Activado</span>
+          </label>
         </div>
       </div>
     </div>
@@ -268,8 +275,8 @@ const lastUpdated = ref<Date | null>(null);
 const filterTerm = ref<string>("");
 const page = ref<number>(1);
 const pageSize = 10;
-const intervalOptions = [15, 30, 60, 120];
-const selectedInterval = ref<number>(30);
+const intervalOptions = [3, 5, 15, 30, 60];
+const selectedInterval = ref<number>(3);
 const autoRefreshEnabled = ref<boolean>(true);
 let refreshTimer: number | undefined;
 
@@ -434,24 +441,7 @@ async function loadAggregatedTimeline() {
       return tb - ta; // más reciente primero
     });
 
-    const deduped: any[] = [];
-    const seen = new Set<string>();
-
-    for (const evt of merged) {
-      const key = [
-        evt.ts || evt.timestamp || evt.time || "",
-        evt.hostname || evt.host || "",
-        evt.username || evt.user || "",
-        evt._remote_ip || evt.remote_ip || evt.ip || "",
-        evt.event_type || evt.type || "",
-      ].join("|");
-
-      if (seen.has(key)) continue;
-      seen.add(key);
-      deduped.push(evt);
-    }
-
-    aggregatedTimelineEvents.value = deduped;
+    aggregatedTimelineEvents.value = merged;
     page.value = 1;
   } catch (e: any) {
     errorTimeline.value = e?.message ?? String(e);
@@ -556,11 +546,23 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   border-color: rgba(148, 163, 184, 0.32);
 }
 
+.activity-toolbar--accent {
+  padding: 0.55rem 0.8rem;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.16), transparent 45%),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.95), rgba(11, 17, 29, 0.88));
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
 .activity-toolbar__group {
   display: flex;
   align-items: center;
   gap: 0.6rem;
   flex-wrap: wrap;
+}
+
+.activity-toolbar__group--compact {
+  gap: 0.45rem;
 }
 
 .activity-toolbar__label {
