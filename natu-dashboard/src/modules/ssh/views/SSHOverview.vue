@@ -1,34 +1,25 @@
 <template>
   <div class="page">
-    <header class="page-header">
-      <h1 class="page-header__title">SSH · Resumen de actividad</h1>
-      <p class="page-header__subtitle">
-        Accesos recientes, intentos fallidos y distribución por IP/usuario para el servidor isov3.
-      </p>
-      <div class="tabs">
-        <span class="tab tab-active">SSH (resumen)</span>
-        <a href="/ssh/activity" class="tab">SSH (actividad)</a>
-        <a href="/ssh/alerts" class="tab">Alertas SSH</a>
-        <a href="/ssh/reactividad" class="tab">Reactividad</a>
-        <a href="/ssh/sudo" class="tab">Sudo (resumen)</a>
-        <a href="/ssh/sudo/activity" class="tab">Sudo (actividad)</a>
-        <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
-        <a href="/ssh/criticality" class="tab">Criticidad</a>
-      </div>
-    </header>
+    <div class="page-sticky">
+      <header class="page-header">
+        <h1 class="page-header__title">SSH · Resumen de actividad</h1>
+        <p class="page-header__subtitle">
+          Accesos recientes, intentos fallidos y distribución por IP/usuario para el servidor isov3.
+        </p>
+        <div class="tabs">
+          <span class="tab tab-active">SSH (resumen)</span>
+          <a href="/ssh/activity" class="tab">SSH (actividad)</a>
+          <a href="/ssh/alerts" class="tab">Alertas SSH</a>
+          <a href="/ssh/reactividad" class="tab">Reactividad</a>
+          <a href="/ssh/sudo" class="tab">Sudo (resumen)</a>
+          <a href="/ssh/sudo/activity" class="tab">Sudo (actividad)</a>
+          <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
+          <a href="/ssh/criticality" class="tab">Criticidad</a>
+        </div>
+      </header>
 
-    <section class="page">
-      <div class="activity-toolbar">
+      <div class="activity-toolbar activity-toolbar--padded">
         <div class="activity-toolbar__group">
-          <label class="activity-toolbar__label">Ventana (min)</label>
-          <input
-            v-model.number="windowMinutes"
-            class="activity-toolbar__input"
-            type="number"
-            min="5"
-            max="10080"
-            placeholder="Todas"
-          />
           <button class="btn-secondary" type="button" @click="refreshData(true)">
             Refrescar ahora
           </button>
@@ -41,20 +32,20 @@
           <span class="filters-bar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
       </div>
+    </div>
 
-      <!-- Estado: cargando resumen -->
-      <section v-if="loadingSummary" class="section--loading">
-        <LoadingSpinner /> Cargando resumen de SSH...
-      </section>
+    <!-- Estado: cargando resumen -->
+    <section v-if="loadingSummary" class="section--loading">
+      <LoadingSpinner /> Cargando resumen de SSH...
+    </section>
 
-      <!-- Estado: error resumen -->
-      <section v-else-if="errorSummary" class="section--error">
-        Error al cargar resumen de SSH: {{ errorSummary }}
-      </section>
+    <!-- Estado: error resumen -->
+    <section v-else-if="errorSummary" class="section--error">
+      Error al cargar resumen de SSH: {{ errorSummary }}
+    </section>
 
-      <!-- Datos OK -->
-      <section v-else class="page">
-
+    <!-- Datos OK -->
+    <section v-else class="page">
       <!-- Cards resumen -->
       <div class="stats-grid">
         <StatCard
@@ -88,17 +79,17 @@
                 <th>Failed</th>
               </tr>
             </thead>
-              <tbody>
-                <tr
-                  v-for="(ip, idx) in topIps"
-                  :key="ip.remote_ip || ip.ip || idx"
-                  class="row--clickable"
-                  @click="openDetail('IP con intentos fallidos', ip, 'Top IPs (failed)')"
-                >
-                  <td>{{ idx + 1 }}</td>
-                  <td>{{ ip.remote_ip || ip.ip || "-" }}</td>
-                  <td>{{ ip.failed ?? ip.failed_count ?? "-" }}</td>
-                </tr>
+            <tbody>
+              <tr
+                v-for="(ip, idx) in topIps"
+                :key="ip.remote_ip || ip.ip || idx"
+                class="row--clickable"
+                @click="openDetail('IP con intentos fallidos', ip, 'Top IPs (failed)')"
+              >
+                <td>{{ idx + 1 }}</td>
+                <td>{{ ip.remote_ip || ip.ip || "-" }}</td>
+                <td>{{ ip.failed ?? ip.failed_count ?? "-" }}</td>
+              </tr>
               <tr v-if="topIps.length === 0">
                 <td colspan="3" style="font-size: 0.78rem; color: #9ca3af;">
                   No se han registrado intentos fallidos aún.
@@ -119,16 +110,16 @@
                 <th>Success</th>
               </tr>
             </thead>
-              <tbody>
-                <tr
-                  v-for="(u, idx) in topUsers"
-                  :key="u.username + '-' + idx"
-                  class="row--clickable"
-                  @click="openDetail('Top usuario SSH', u, 'Top usuarios (failed/success)')"
-                >
-                  <td>{{ idx + 1 }}</td>
-                  <td>{{ u.username }}</td>
-                  <td>{{ u.failed ?? 0 }}</td>
+            <tbody>
+              <tr
+                v-for="(u, idx) in topUsers"
+                :key="u.username + '-' + idx"
+                class="row--clickable"
+                @click="openDetail('Top usuario SSH', u, 'Top usuarios (failed/success)')"
+              >
+                <td>{{ idx + 1 }}</td>
+                <td>{{ u.username }}</td>
+                <td>{{ u.failed ?? 0 }}</td>
                 <td>{{ u.success ?? 0 }}</td>
               </tr>
               <tr v-if="topUsers.length === 0">
@@ -228,7 +219,8 @@
                 class="btn-secondary"
                 type="button"
                 :disabled="page === 1"
-                @click="changePage(page - 1)">
+                @click="changePage(page - 1)"
+              >
                 Anterior
               </button>
               <span class="pagination__label">Página {{ page }} / {{ totalPages }}</span>
@@ -236,14 +228,14 @@
                 class="btn-secondary"
                 type="button"
                 :disabled="page === totalPages"
-                @click="changePage(page + 1)">
+                @click="changePage(page + 1)"
+              >
                 Siguiente
               </button>
             </div>
           </template>
         </div>
       </section>
-    </section>
     </section>
 
     <EventDetailDrawer
@@ -273,7 +265,6 @@ const hostsCount = ref<number>(0);
 const topIps = ref<any[]>([]);
 const topUsers = ref<any[]>([]);
 const lastUpdated = ref<Date | null>(null);
-const windowMinutes = ref<number | null>(null);
 const filterTerm = ref<string>("");
 const page = ref<number>(1);
 const pageSize = 10;
@@ -354,16 +345,7 @@ async function loadSummary() {
   errorSummary.value = null;
 
   try {
-    const params: Record<string, any> = {};
-    if (windowMinutes.value && windowMinutes.value > 0) {
-      params.minutes = windowMinutes.value;
-    }
-
-    const res = await api.get<any>("/ssh_summary", params);
-
-    if (typeof res?.window_minutes === "number") {
-      windowMinutes.value = res.window_minutes;
-    }
+    const res = await api.get<any>("/ssh_summary");
 
     const hosts = Array.isArray(res?.hosts) ? res.hosts : [];
     hostsCount.value = hosts.length;
@@ -419,9 +401,6 @@ async function loadAggregatedTimeline() {
       api
         .get<any>("/ssh_timeline", {
           ip,
-          ...(windowMinutes.value && windowMinutes.value > 0
-            ? { minutes: windowMinutes.value }
-            : {}),
           limit: 200,
         })
         .then((res) => {
@@ -455,7 +434,24 @@ async function loadAggregatedTimeline() {
       return tb - ta; // más reciente primero
     });
 
-    aggregatedTimelineEvents.value = merged;
+    const deduped: any[] = [];
+    const seen = new Set<string>();
+
+    for (const evt of merged) {
+      const key = [
+        evt.ts || evt.timestamp || evt.time || "",
+        evt.hostname || evt.host || "",
+        evt.username || evt.user || "",
+        evt._remote_ip || evt.remote_ip || evt.ip || "",
+        evt.event_type || evt.type || "",
+      ].join("|");
+
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(evt);
+    }
+
+    aggregatedTimelineEvents.value = deduped;
     page.value = 1;
   } catch (e: any) {
     errorTimeline.value = e?.message ?? String(e);
@@ -525,6 +521,21 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   cursor: pointer;
 }
 
+.page-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.6rem;
+  background:
+    linear-gradient(to bottom, rgba(2, 6, 23, 0.95), rgba(2, 6, 23, 0.9)),
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.08), transparent 55%);
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.6);
+}
+
 /* Toolbar reutilizada de SSH (actividad) */
 .activity-toolbar {
   display: flex;
@@ -537,6 +548,12 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   border-radius: 0.9rem;
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.82));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.activity-toolbar--padded {
+  padding: 0.65rem 0.8rem;
+  background: linear-gradient(90deg, rgba(30, 41, 59, 0.75), rgba(15, 23, 42, 0.82));
+  border-color: rgba(148, 163, 184, 0.32);
 }
 
 .activity-toolbar__group {
