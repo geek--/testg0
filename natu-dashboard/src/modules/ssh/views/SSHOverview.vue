@@ -20,7 +20,16 @@
     <section class="page">
       <div class="activity-toolbar">
         <div class="activity-toolbar__group">
-          <button class="btn-primary" type="button" @click="refreshData(true)">
+          <label class="activity-toolbar__label">Ventana (min)</label>
+          <input
+            v-model.number="windowMinutes"
+            class="activity-toolbar__input"
+            type="number"
+            min="5"
+            max="10080"
+            placeholder="Todas"
+          />
+          <button class="btn-secondary" type="button" @click="refreshData(true)">
             Refrescar ahora
           </button>
           <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
@@ -264,6 +273,7 @@ const hostsCount = ref<number>(0);
 const topIps = ref<any[]>([]);
 const topUsers = ref<any[]>([]);
 const lastUpdated = ref<Date | null>(null);
+const windowMinutes = ref<number | null>(null);
 const filterTerm = ref<string>("");
 const page = ref<number>(1);
 const pageSize = 10;
@@ -344,7 +354,16 @@ async function loadSummary() {
   errorSummary.value = null;
 
   try {
-    const res = await api.get<any>("/ssh_summary");
+    const params: Record<string, any> = {};
+    if (windowMinutes.value && windowMinutes.value > 0) {
+      params.minutes = windowMinutes.value;
+    }
+
+    const res = await api.get<any>("/ssh_summary", params);
+
+    if (typeof res?.window_minutes === "number") {
+      windowMinutes.value = res.window_minutes;
+    }
 
     const hosts = Array.isArray(res?.hosts) ? res.hosts : [];
     hostsCount.value = hosts.length;
@@ -400,6 +419,9 @@ async function loadAggregatedTimeline() {
       api
         .get<any>("/ssh_timeline", {
           ip,
+          ...(windowMinutes.value && windowMinutes.value > 0
+            ? { minutes: windowMinutes.value }
+            : {}),
           limit: 200,
         })
         .then((res) => {
@@ -483,14 +505,6 @@ function changePage(next: number) {
 onMounted(() => {
   void refreshData(true);
   scheduleAutoRefresh();
-});
-
-watch(filterTerm, () => {
-  page.value = 1;
-});
-
-watch(filterTerm, () => {
-  page.value = 1;
 });
 
 watch([autoRefreshEnabled, selectedInterval], () => {
@@ -615,59 +629,6 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   color: #9ca3af;
 }
 
-.filters-bar {
-  display: flex;
-  gap: 1rem;
-  align-items: flex-end;
-  padding: 0.65rem 0.85rem;
-  border-radius: 0.75rem;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: radial-gradient(
-      circle at top left,
-      rgba(56, 189, 248, 0.08),
-      transparent
-    ),
-    rgba(15, 23, 42, 0.9);
-}
-
-.filters-bar--compact {
-  margin-bottom: 0.65rem;
-}
-
-.filters-bar__group {
-  display: flex;
-  flex-direction: column;
-  min-width: 180px;
-}
-
-.filters-bar__label {
-  font-size: 0.75rem;
-  color: #9ca3af;
-  margin-bottom: 0.25rem;
-}
-
-.filters-bar__input {
-  background: rgba(15, 23, 42, 0.9);
-  border-radius: 0.5rem;
-  border: 1px solid rgba(148, 163, 184, 0.5);
-  padding: 0.35rem 0.6rem;
-  font-size: 0.85rem;
-  color: #e5e7eb;
-}
-
-.filters-bar__input::placeholder {
-  color: #6b7280;
-}
-
-.filters-bar__actions {
-  margin-left: auto;
-}
-
-.filters-bar__hint {
-  font-size: 0.72rem;
-  color: #9ca3af;
-}
-
 .btn-secondary {
   border-radius: 9999px;
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -681,21 +642,6 @@ watch([autoRefreshEnabled, selectedInterval], () => {
 .btn-secondary--active {
   background: linear-gradient(90deg, #2563eb, #4f46e5);
   border-color: transparent;
-}
-
-.btn-primary {
-  border-radius: 9999px;
-  border: none;
-  padding: 0.4rem 0.9rem;
-  font-size: 0.8rem;
-  background: linear-gradient(90deg, #2563eb, #4f46e5);
-  color: #f9fafb;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.btn-primary:hover {
-  filter: brightness(1.08);
 }
 
 .pagination {
