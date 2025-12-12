@@ -52,12 +52,6 @@
       <!-- Cards resumen -->
       <div class="stats-grid">
         <StatCard
-          title="Ventana analizada"
-          :value="windowLabel"
-          subtitle="Parámetro minutes en /api/v1/ssh_summary"
-        />
-
-        <StatCard
           title="SSH failed (total)"
           :value="failedTotal"
           subtitle="Suma de intentos fallidos en todos los hosts"
@@ -101,7 +95,7 @@
                 </tr>
               <tr v-if="topIps.length === 0">
                 <td colspan="3" style="font-size: 0.78rem; color: #9ca3af;">
-                  No se han registrado intentos fallidos en la ventana seleccionada.
+                  No se han registrado intentos fallidos aún.
                 </td>
               </tr>
             </tbody>
@@ -133,7 +127,7 @@
               </tr>
               <tr v-if="topUsers.length === 0">
                 <td colspan="4" style="font-size: 0.78rem; color: #9ca3af;">
-                  No se han registrado usuarios en la ventana seleccionada.
+                  No se han registrado usuarios todavía.
                 </td>
               </tr>
             </tbody>
@@ -144,9 +138,7 @@
       <!-- Timeline genérico (top IPs) -->
       <section style="margin-top: 1rem;">
         <div class="table-card">
-          <div class="table-card__title">
-            Timeline SSH (top IPs) — últimos {{ windowMinutes ?? WINDOW_MINUTES }} min
-          </div>
+          <div class="table-card__title">Timeline SSH (top IPs) — últimos eventos</div>
 
           <!-- Estado timeline -->
           <div v-if="loadingTimeline" class="section--loading">
@@ -188,7 +180,7 @@
 
                 <tr v-if="topIps.length === 0">
                   <td colspan="7" style="font-size: 0.78rem; color: #9ca3af;">
-                    No hay IPs con intentos fallidos en la ventana seleccionada.
+                    No hay IPs con intentos fallidos registradas todavía.
                     El timeline genérico se construye a partir de las IPs más
                     activas en <strong>SSH failed</strong>. Para ver solo tus
                     logins exitosos necesitaremos extender el natu-core más
@@ -249,13 +241,11 @@ import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
 import EventDetailDrawer from "../../../components/shared/EventDetailDrawer.vue";
 
-const WINDOW_MINUTES = 1440;
 const MAX_TIMELINE_IPS = 5;
 
 // estado resumen
 const loadingSummary = ref(true);
 const errorSummary = ref<string | null>(null);
-const windowMinutes = ref<number | null>(WINDOW_MINUTES);
 const failedTotal = ref<number>(0);
 const successTotal = ref<number>(0);
 const hostsCount = ref<number>(0);
@@ -301,8 +291,6 @@ const detailEvent = ref<any | null>(null);
 const detailTitle = ref("Detalle evento SSH");
 const detailSubtitle = ref("Timeline SSH (top IPs)");
 
-const windowLabel = computed(() => `${windowMinutes.value ?? WINDOW_MINUTES} min`);
-
 const lastUpdatedLabel = computed(() => {
   if (!lastUpdated.value) return "—";
   return lastUpdated.value.toLocaleTimeString();
@@ -340,15 +328,7 @@ async function loadSummary() {
   errorSummary.value = null;
 
   try {
-    const res = await api.get<any>("/ssh_summary", {
-      minutes: WINDOW_MINUTES,
-    });
-
-    if (typeof res?.window_minutes === "number") {
-      windowMinutes.value = res.window_minutes;
-    } else {
-      windowMinutes.value = WINDOW_MINUTES;
-    }
+    const res = await api.get<any>("/ssh_summary");
 
     const hosts = Array.isArray(res?.hosts) ? res.hosts : [];
     hostsCount.value = hosts.length;
@@ -395,8 +375,6 @@ async function loadAggregatedTimeline() {
   errorTimeline.value = null;
 
   try {
-    const minutes = windowMinutes.value ?? WINDOW_MINUTES;
-
     const ips = topIps.value
       .map((r: any) => r.remote_ip || r.ip)
       .filter(Boolean)
@@ -405,8 +383,8 @@ async function loadAggregatedTimeline() {
     const promises = ips.map((ip: string) =>
       api
         .get<any>("/ssh_timeline", {
-          minutes,
           ip,
+          limit: 200,
         })
         .then((res) => {
           const events =
@@ -541,42 +519,6 @@ watch(filterTerm, () => {
 }
 
 .btn-secondary--active {
-  background: linear-gradient(90deg, #2563eb, #4f46e5);
-  border-color: transparent;
-}
-
-.quick-window {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-}
-
-/* Selector de ventana */
-.window-selector {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.65rem;
-}
-
-.window-selector__label {
-  font-size: 0.72rem;
-  color: #9ca3af;
-}
-
-.window-selector__btn {
-  border-radius: 9999px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(15, 23, 42, 0.9);
-  padding: 0.15rem 0.65rem;
-  font-size: 0.75rem;
-  color: #e5e7eb;
-  cursor: pointer;
-}
-
-.window-selector__btn--active {
   background: linear-gradient(90deg, #2563eb, #4f46e5);
   border-color: transparent;
 }
