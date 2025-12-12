@@ -1608,7 +1608,7 @@ func (s *Server) handleSSHTimeline(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 
 	query := `
-SELECT DISTINCT
+SELECT
 e.ts,
 a.hostname,
 e.event_type,
