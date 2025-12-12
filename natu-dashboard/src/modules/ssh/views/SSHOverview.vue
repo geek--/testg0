@@ -18,15 +18,12 @@
     </header>
 
     <section class="page">
-      <div class="filters-bar">
-        <div class="filters-bar__group">
-          <label class="filters-bar__label">Buscar</label>
-          <input
-            v-model="filterTerm"
-            class="filters-bar__input"
-            type="text"
-            placeholder="IP, host o usuario"
-          />
+      <div class="activity-toolbar">
+        <div class="activity-toolbar__group">
+          <button class="btn-primary" type="button" @click="refreshData(true)">
+            Refrescar ahora
+          </button>
+          <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
         <div class="filters-bar__actions">
           <button class="btn-primary" type="button" @click="refreshData(true)">
@@ -137,6 +134,21 @@
 
       <!-- Timeline genérico (top IPs) -->
       <section style="margin-top: 1rem;">
+        <div class="filters-bar filters-bar--compact">
+          <div class="filters-bar__group">
+            <label class="filters-bar__label">Buscar</label>
+            <input
+              v-model="filterTerm"
+              class="filters-bar__input"
+              type="text"
+              placeholder="IP, host o usuario"
+            />
+          </div>
+          <div class="filters-bar__actions">
+            <span class="filters-bar__hint">Filtra el timeline SSH (host/IP/usuario)</span>
+          </div>
+        </div>
+
         <div class="table-card">
           <div class="table-card__title">Timeline SSH (top IPs) — últimos eventos</div>
 
@@ -255,6 +267,10 @@ const lastUpdated = ref<Date | null>(null);
 const filterTerm = ref<string>("");
 const page = ref<number>(1);
 const pageSize = 10;
+const intervalOptions = [15, 30, 60, 120];
+const selectedInterval = ref<number>(30);
+const autoRefreshEnabled = ref<boolean>(true);
+let refreshTimer: number | undefined;
 
 // timeline agregado
 const loadingTimeline = ref(false);
@@ -418,12 +434,29 @@ async function loadAggregatedTimeline() {
     });
 
     aggregatedTimelineEvents.value = merged;
+    page.value = 1;
   } catch (e: any) {
     errorTimeline.value = e?.message ?? String(e);
     aggregatedTimelineEvents.value = [];
   } finally {
     loadingTimeline.value = false;
   }
+}
+
+function clearAutoRefresh() {
+  if (refreshTimer !== undefined) {
+    window.clearInterval(refreshTimer);
+    refreshTimer = undefined;
+  }
+}
+
+function scheduleAutoRefresh() {
+  clearAutoRefresh();
+  if (!autoRefreshEnabled.value) return;
+
+  refreshTimer = window.setInterval(() => {
+    void refreshData(true);
+  }, selectedInterval.value * 1000);
 }
 
 async function refreshData(refreshTimeline: boolean) {
@@ -449,10 +482,19 @@ function changePage(next: number) {
 
 onMounted(() => {
   void refreshData(true);
+  scheduleAutoRefresh();
 });
 
 watch(filterTerm, () => {
   page.value = 1;
+});
+
+watch(filterTerm, () => {
+  page.value = 1;
+});
+
+watch([autoRefreshEnabled, selectedInterval], () => {
+  scheduleAutoRefresh();
 });
 </script>
 
@@ -508,6 +550,59 @@ watch(filterTerm, () => {
   color: #e2e8f0;
 }
 
+.filters-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: radial-gradient(
+      circle at top left,
+      rgba(56, 189, 248, 0.08),
+      transparent
+    ),
+    rgba(15, 23, 42, 0.9);
+}
+
+.filters-bar--compact {
+  margin-bottom: 0.65rem;
+}
+
+.filters-bar__group {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+
+.filters-bar__label {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-bottom: 0.25rem;
+}
+
+.filters-bar__input {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  color: #e5e7eb;
+}
+
+.filters-bar__input::placeholder {
+  color: #6b7280;
+}
+
+.filters-bar__actions {
+  margin-left: auto;
+}
+
+.filters-bar__hint {
+  font-size: 0.72rem;
+  color: #9ca3af;
+}
+
 .btn-secondary {
   border-radius: 9999px;
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -521,5 +616,32 @@ watch(filterTerm, () => {
 .btn-secondary--active {
   background: linear-gradient(90deg, #2563eb, #4f46e5);
   border-color: transparent;
+}
+
+.btn-primary {
+  border-radius: 9999px;
+  border: none;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  background: linear-gradient(90deg, #2563eb, #4f46e5);
+  color: #f9fafb;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.pagination__label {
+  font-size: 0.82rem;
+  color: #94a3b8;
 }
 </style>
