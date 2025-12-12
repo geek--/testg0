@@ -34,18 +34,11 @@
           </button>
           <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
-
-        <div class="activity-toolbar__group">
-          <label class="activity-toolbar__label">Auto-refresco</label>
-          <select v-model.number="selectedInterval" class="activity-toolbar__input">
-            <option v-for="opt in intervalOptions" :key="opt" :value="opt">
-              Cada {{ opt }}s
-            </option>
-          </select>
-          <label class="activity-toolbar__toggle">
-            <input type="checkbox" v-model="autoRefreshEnabled" />
-            <span>Activado</span>
-          </label>
+        <div class="filters-bar__actions">
+          <button class="btn-primary" type="button" @click="refreshData(true)">
+            Refrescar
+          </button>
+          <span class="filters-bar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
       </div>
 
@@ -263,7 +256,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { api } from "../../../services/api";
 import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
@@ -514,8 +507,8 @@ onMounted(() => {
   scheduleAutoRefresh();
 });
 
-onBeforeUnmount(() => {
-  clearAutoRefresh();
+watch([autoRefreshEnabled, selectedInterval], () => {
+  scheduleAutoRefresh();
 });
 
 watch(filterTerm, () => {
@@ -539,16 +532,17 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
-  padding: 0.45rem 0.6rem;
+  padding: 0.65rem 0.85rem;
   border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 0.75rem;
-  background: rgba(15, 23, 42, 0.6);
+  border-radius: 0.9rem;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.82));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .activity-toolbar__group {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   flex-wrap: wrap;
 }
 
@@ -558,12 +552,12 @@ watch([autoRefreshEnabled, selectedInterval], () => {
 }
 
 .activity-toolbar__input {
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  border-radius: 0.5rem;
-  padding: 0.3rem 0.5rem;
+  background: rgba(17, 24, 39, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.55rem;
+  padding: 0.38rem 0.6rem;
   color: #e2e8f0;
-  min-width: 90px;
+  min-width: 96px;
 }
 
 .activity-toolbar__hint {
@@ -577,6 +571,9 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   gap: 0.35rem;
   font-size: 0.9rem;
   color: #e2e8f0;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.45rem;
+  background: rgba(59, 130, 246, 0.12);
 }
 
 .filters-bar {
