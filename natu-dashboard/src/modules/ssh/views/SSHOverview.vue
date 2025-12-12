@@ -9,7 +9,9 @@
         <span class="tab tab-active">SSH (resumen)</span>
         <a href="/ssh/activity" class="tab">SSH (actividad)</a>
         <a href="/ssh/alerts" class="tab">Alertas SSH</a>
-        <a href="/ssh/sudo" class="tab">Sudo (actividad)</a>
+        <a href="/ssh/reactividad" class="tab">Reactividad</a>
+        <a href="/ssh/sudo" class="tab">Sudo (resumen)</a>
+        <a href="/ssh/sudo/activity" class="tab">Sudo (actividad)</a>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
         <a href="/ssh/criticality" class="tab">Criticidad</a>
       </div>
@@ -18,29 +20,7 @@
     <section class="page">
       <div class="activity-toolbar">
         <div class="activity-toolbar__group">
-          <label class="activity-toolbar__label">Ventana (min)</label>
-          <input
-            v-model.number="selectedWindow"
-            class="activity-toolbar__input"
-            type="number"
-            min="5"
-            max="10080"
-          />
-          <div class="quick-window">
-            <span class="window-selector__label">Rápidos:</span>
-            <button
-              v-for="m in windowOptions"
-              :key="m"
-              type="button"
-              class="window-selector__btn"
-              :class="{ 'window-selector__btn--active': selectedWindow === m }"
-              @click="onChangeWindow(m)"
-            >
-              <span v-if="m >= 1440">{{ m / 1440 }} día(s)</span>
-              <span v-else>{{ m }} min</span>
-            </button>
-          </div>
-          <button class="btn-secondary" type="button" @click="refreshData(true)">
+          <button class="btn-primary" type="button" @click="refreshData(true)">
             Refrescar ahora
           </button>
           <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
@@ -75,12 +55,6 @@
 
       <!-- Cards resumen -->
       <div class="stats-grid">
-        <StatCard
-          title="Ventana analizada"
-          :value="windowLabel"
-          subtitle="Parámetro minutes en /api/v1/ssh_summary"
-        />
-
         <StatCard
           title="SSH failed (total)"
           :value="failedTotal"
@@ -125,7 +99,7 @@
                 </tr>
               <tr v-if="topIps.length === 0">
                 <td colspan="3" style="font-size: 0.78rem; color: #9ca3af;">
-                  No se han registrado intentos fallidos en la ventana seleccionada.
+                  No se han registrado intentos fallidos aún.
                 </td>
               </tr>
             </tbody>
@@ -157,7 +131,7 @@
               </tr>
               <tr v-if="topUsers.length === 0">
                 <td colspan="4" style="font-size: 0.78rem; color: #9ca3af;">
-                  No se han registrado usuarios en la ventana seleccionada.
+                  No se han registrado usuarios todavía.
                 </td>
               </tr>
             </tbody>
@@ -167,10 +141,23 @@
 
       <!-- Timeline genérico (top IPs) -->
       <section style="margin-top: 1rem;">
-        <div class="table-card">
-          <div class="table-card__title">
-            Timeline SSH (top IPs) — últimos {{ windowMinutes ?? selectedWindow }} min
+        <div class="filters-bar filters-bar--compact">
+          <div class="filters-bar__group">
+            <label class="filters-bar__label">Buscar</label>
+            <input
+              v-model="filterTerm"
+              class="filters-bar__input"
+              type="text"
+              placeholder="IP, host o usuario"
+            />
           </div>
+          <div class="filters-bar__actions">
+            <span class="filters-bar__hint">Filtra el timeline SSH (host/IP/usuario)</span>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-card__title">Timeline SSH (top IPs) — últimos eventos</div>
 
           <!-- Estado timeline -->
           <div v-if="loadingTimeline" class="section--loading">
@@ -196,7 +183,7 @@
               </thead>
               <tbody>
                 <tr
-                  v-for="(e, idx) in aggregatedTimelineEvents"
+                  v-for="(e, idx) in paginatedTimeline"
                   :key="idx"
                   class="row--clickable"
                   @click="openDetail('Evento SSH', e)"
@@ -212,7 +199,7 @@
 
                 <tr v-if="topIps.length === 0">
                   <td colspan="7" style="font-size: 0.78rem; color: #9ca3af;">
-                    No hay IPs con intentos fallidos en la ventana seleccionada.
+                    No hay IPs con intentos fallidos registradas todavía.
                     El timeline genérico se construye a partir de las IPs más
                     activas en <strong>SSH failed</strong>. Para ver solo tus
                     logins exitosos necesitaremos extender el natu-core más
@@ -222,7 +209,7 @@
 
                 <tr
                   v-else-if="
-                    topIps.length > 0 && aggregatedTimelineEvents.length === 0
+                    topIps.length > 0 && filteredTimeline.length === 0
                   "
                 >
                   <td colspan="7" style="font-size: 0.78rem; color: #9ca3af;">
@@ -233,6 +220,24 @@
                 </tr>
               </tbody>
             </table>
+
+            <div class="pagination" v-if="totalPages > 1">
+              <button
+                class="btn-secondary"
+                type="button"
+                :disabled="page === 1"
+                @click="changePage(page - 1)">
+                Anterior
+              </button>
+              <span class="pagination__label">Página {{ page }} / {{ totalPages }}</span>
+              <button
+                class="btn-secondary"
+                type="button"
+                :disabled="page === totalPages"
+                @click="changePage(page + 1)">
+                Siguiente
+              </button>
+            </div>
           </template>
         </div>
       </section>
@@ -255,44 +260,59 @@ import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
 import EventDetailDrawer from "../../../components/shared/EventDetailDrawer.vue";
 
-const WINDOW_MINUTES = 240;
-
-// opciones de ventana (minutos)
-const windowOptions = [60, 240, 1440];
 const MAX_TIMELINE_IPS = 5;
-const intervalOptions = [5, 10, 30, 60];
 
 // estado resumen
 const loadingSummary = ref(true);
 const errorSummary = ref<string | null>(null);
-const windowMinutes = ref<number | null>(null);
-const selectedWindow = ref<number>(WINDOW_MINUTES);
 const failedTotal = ref<number>(0);
 const successTotal = ref<number>(0);
 const hostsCount = ref<number>(0);
 const topIps = ref<any[]>([]);
 const topUsers = ref<any[]>([]);
 const lastUpdated = ref<Date | null>(null);
+const filterTerm = ref<string>("");
+const page = ref<number>(1);
+const pageSize = 10;
+const intervalOptions = [15, 30, 60, 120];
+const selectedInterval = ref<number>(30);
+const autoRefreshEnabled = ref<boolean>(true);
+let refreshTimer: number | undefined;
 
 // timeline agregado
 const loadingTimeline = ref(false);
 const errorTimeline = ref<string | null>(null);
 const aggregatedTimelineEvents = ref<any[]>([]);
+const filteredTimeline = computed(() => {
+  if (!filterTerm.value) return aggregatedTimelineEvents.value;
+  const term = filterTerm.value.toLowerCase();
+  return aggregatedTimelineEvents.value.filter((e) => {
+    return [
+      e.hostname,
+      e.host,
+      e._remote_ip,
+      e.remote_ip,
+      e.ip,
+      e.username,
+      e.user,
+    ]
+      .filter(Boolean)
+      .some((v: string) => String(v).toLowerCase().includes(term));
+  });
+});
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(filteredTimeline.value.length / pageSize)),
+);
+const paginatedTimeline = computed(() => {
+  const start = (page.value - 1) * pageSize;
+  return filteredTimeline.value.slice(start, start + pageSize);
+});
 
 // detalle
 const showDetail = ref(false);
 const detailEvent = ref<any | null>(null);
 const detailTitle = ref("Detalle evento SSH");
 const detailSubtitle = ref("Timeline SSH (top IPs)");
-
-// auto refresh
-const selectedInterval = ref<number>(30);
-const autoRefreshEnabled = ref<boolean>(true);
-let refreshHandle: number | null = null;
-
-const windowLabel = computed(
-  () => `${windowMinutes.value ?? selectedWindow.value} min`,
-);
 
 const lastUpdatedLabel = computed(() => {
   if (!lastUpdated.value) return "—";
@@ -331,15 +351,7 @@ async function loadSummary() {
   errorSummary.value = null;
 
   try {
-    const res = await api.get<any>("/ssh_summary", {
-      minutes: selectedWindow.value,
-    });
-
-    if (typeof res?.window_minutes === "number") {
-      windowMinutes.value = res.window_minutes;
-    } else {
-      windowMinutes.value = selectedWindow.value;
-    }
+    const res = await api.get<any>("/ssh_summary");
 
     const hosts = Array.isArray(res?.hosts) ? res.hosts : [];
     hostsCount.value = hosts.length;
@@ -379,7 +391,6 @@ async function loadAggregatedTimeline() {
   aggregatedTimelineEvents.value = [];
 
   if (!topIps.value.length) {
-    // no hay IPs de referencia, no podemos construir timeline genérico
     return;
   }
 
@@ -387,8 +398,6 @@ async function loadAggregatedTimeline() {
   errorTimeline.value = null;
 
   try {
-    const minutes = windowMinutes.value ?? selectedWindow.value;
-
     const ips = topIps.value
       .map((r: any) => r.remote_ip || r.ip)
       .filter(Boolean)
@@ -397,8 +406,8 @@ async function loadAggregatedTimeline() {
     const promises = ips.map((ip: string) =>
       api
         .get<any>("/ssh_timeline", {
-          minutes,
           ip,
+          limit: 200,
         })
         .then((res) => {
           const events =
@@ -432,6 +441,7 @@ async function loadAggregatedTimeline() {
     });
 
     aggregatedTimelineEvents.value = merged;
+    page.value = 1;
   } catch (e: any) {
     errorTimeline.value = e?.message ?? String(e);
     aggregatedTimelineEvents.value = [];
@@ -440,9 +450,20 @@ async function loadAggregatedTimeline() {
   }
 }
 
-async function onChangeWindow(minutes: number) {
-  if (selectedWindow.value === minutes) return;
-  selectedWindow.value = minutes;
+function clearAutoRefresh() {
+  if (refreshTimer !== undefined) {
+    window.clearInterval(refreshTimer);
+    refreshTimer = undefined;
+  }
+}
+
+function scheduleAutoRefresh() {
+  clearAutoRefresh();
+  if (!autoRefreshEnabled.value) return;
+
+  refreshTimer = window.setInterval(() => {
+    void refreshData(true);
+  }, selectedInterval.value * 1000);
 }
 
 async function refreshData(refreshTimeline: boolean) {
@@ -460,37 +481,27 @@ function openDetail(title: string, evt: any, subtitle?: string) {
   showDetail.value = true;
 }
 
-watch(selectedWindow, () => {
-  void refreshData(true);
-});
-
-function clearAutoRefresh() {
-  if (refreshHandle) {
-    window.clearInterval(refreshHandle);
-    refreshHandle = null;
-  }
+function changePage(next: number) {
+  const maxPage = totalPages.value;
+  if (next < 1 || next > maxPage) return;
+  page.value = next;
 }
-
-function setupAutoRefresh() {
-  clearAutoRefresh();
-  if (!autoRefreshEnabled.value) return;
-
-  refreshHandle = window.setInterval(() => {
-    void refreshData(true);
-  }, selectedInterval.value * 1000);
-}
-
-watch([selectedInterval, autoRefreshEnabled], () => {
-  setupAutoRefresh();
-});
 
 onMounted(() => {
   void refreshData(true);
-  setupAutoRefresh();
+  scheduleAutoRefresh();
 });
 
 onBeforeUnmount(() => {
   clearAutoRefresh();
+});
+
+watch(filterTerm, () => {
+  page.value = 1;
+});
+
+watch([autoRefreshEnabled, selectedInterval], () => {
+  scheduleAutoRefresh();
 });
 </script>
 
@@ -546,6 +557,59 @@ onBeforeUnmount(() => {
   color: #e2e8f0;
 }
 
+.filters-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: radial-gradient(
+      circle at top left,
+      rgba(56, 189, 248, 0.08),
+      transparent
+    ),
+    rgba(15, 23, 42, 0.9);
+}
+
+.filters-bar--compact {
+  margin-bottom: 0.65rem;
+}
+
+.filters-bar__group {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+
+.filters-bar__label {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-bottom: 0.25rem;
+}
+
+.filters-bar__input {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  color: #e5e7eb;
+}
+
+.filters-bar__input::placeholder {
+  color: #6b7280;
+}
+
+.filters-bar__actions {
+  margin-left: auto;
+}
+
+.filters-bar__hint {
+  font-size: 0.72rem;
+  color: #9ca3af;
+}
+
 .btn-secondary {
   border-radius: 9999px;
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -561,39 +625,30 @@ onBeforeUnmount(() => {
   border-color: transparent;
 }
 
-.quick-window {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-}
-
-/* Selector de ventana */
-.window-selector {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.65rem;
-}
-
-.window-selector__label {
-  font-size: 0.72rem;
-  color: #9ca3af;
-}
-
-.window-selector__btn {
+.btn-primary {
   border-radius: 9999px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(15, 23, 42, 0.9);
-  padding: 0.15rem 0.65rem;
-  font-size: 0.75rem;
-  color: #e5e7eb;
+  border: none;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  background: linear-gradient(90deg, #2563eb, #4f46e5);
+  color: #f9fafb;
   cursor: pointer;
+  white-space: nowrap;
 }
 
-.window-selector__btn--active {
-  background: linear-gradient(90deg, #2563eb, #4f46e5);
-  border-color: transparent;
+.btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.pagination__label {
+  font-size: 0.82rem;
+  color: #94a3b8;
 }
 </style>
