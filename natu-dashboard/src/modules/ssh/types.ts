@@ -79,3 +79,20 @@ export interface SSHActivityResponse {
   ips: SSHActivityIP[];
   events: SSHActivityEvent[];
 }
+
+// SSH bans / reactividad
+export interface SSHBanItem {
+  hostname: string;
+  ip: string;
+  jail: string;
+  banned_at?: string;
+  reason?: string;
+  source?: string;
+  synced_at: string;
+}
+
+export interface SSHBanResponse {
+  window_minutes: number;
+  generated_at: string;
+  bans: SSHBanItem[];
+}

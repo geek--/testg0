@@ -10,7 +10,9 @@
         <a href="/ssh" class="tab">SSH (resumen)</a>
         <a href="/ssh/activity" class="tab">SSH (actividad)</a>
         <span class="tab tab-active">Alertas SSH</span>
-        <a href="/ssh/sudo" class="tab">Sudo (actividad)</a>
+        <a href="/ssh/reactividad" class="tab">Reactividad</a>
+        <a href="/ssh/sudo" class="tab">Sudo (resumen)</a>
+        <a href="/ssh/sudo/activity" class="tab">Sudo (actividad)</a>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
         <a href="/ssh/criticality" class="tab">Criticidad</a>
       </div>
