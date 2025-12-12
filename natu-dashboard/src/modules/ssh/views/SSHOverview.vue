@@ -25,18 +25,11 @@
           </button>
           <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
-
-        <div class="activity-toolbar__group">
-          <label class="activity-toolbar__label">Auto-refresco</label>
-          <select v-model.number="selectedInterval" class="activity-toolbar__input">
-            <option v-for="opt in intervalOptions" :key="opt" :value="opt">
-              Cada {{ opt }}s
-            </option>
-          </select>
-          <label class="activity-toolbar__toggle">
-            <input type="checkbox" v-model="autoRefreshEnabled" />
-            <span>Activado</span>
-          </label>
+        <div class="filters-bar__actions">
+          <button class="btn-primary" type="button" @click="refreshData(true)">
+            Refrescar
+          </button>
+          <span class="filters-bar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
       </div>
 
@@ -254,7 +247,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { api } from "../../../services/api";
 import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
@@ -492,8 +485,8 @@ onMounted(() => {
   scheduleAutoRefresh();
 });
 
-onBeforeUnmount(() => {
-  clearAutoRefresh();
+watch(filterTerm, () => {
+  page.value = 1;
 });
 
 watch(filterTerm, () => {
