@@ -283,6 +283,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1.4rem;
+  padding: 1.25rem 1.6rem 1.4rem;
 }
 
 .page-header {
@@ -292,7 +293,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 5;
-  padding: 0.4rem 0;
+  padding: 1.25rem 1.6rem 1.4rem;
   background:
     linear-gradient(to bottom, rgba(2, 6, 23, 0.96), rgba(2, 6, 23, 0.92)),
     radial-gradient(circle at top left, rgba(59, 130, 246, 0.08), transparent 55%);

@@ -602,8 +602,8 @@ func (s *Server) handleSSHSummary(w http.ResponseWriter, r *http.Request) {
 	var hosts []SSHHostSummary
 	baseQuery := `
 SELECT a.hostname,
-       COALESCE(SUM(CASE WHEN e.event_type = 'ssh_failed_login'  THEN 1 ELSE 0 END), 0) AS failed,
-       COALESCE(SUM(CASE WHEN e.event_type = 'ssh_login_success' THEN 1 ELSE 0 END), 0) AS success
+       COUNT(DISTINCT (e.ts, e.payload->>'remote_ip', e.payload->>'username', e.event_type, COALESCE(e.payload->>'raw_line', ''))) FILTER (WHERE e.event_type = 'ssh_failed_login')  AS failed,
+       COUNT(DISTINCT (e.ts, e.payload->>'remote_ip', e.payload->>'username', e.event_type, COALESCE(e.payload->>'raw_line', ''))) FILTER (WHERE e.event_type = 'ssh_login_success') AS success
 FROM raw_events e
 JOIN agents a ON e.agent_id = a.id
 WHERE e.source = 'auth'
@@ -649,7 +649,7 @@ WHERE e.source = 'auth'
 	topIPQuery := `
 SELECT
 e.payload->>'remote_ip' AS remote_ip,
-COUNT(*) AS failed_count
+COUNT(DISTINCT (e.ts, e.payload->>'remote_ip', e.payload->>'username', e.event_type, COALESCE(e.payload->>'raw_line', ''))) AS failed_count
 FROM raw_events e
 WHERE e.source = 'auth'
   AND e.event_type = 'ssh_failed_login'
@@ -697,8 +697,8 @@ WHERE e.source = 'auth'
 	userQuery := `
 SELECT
 e.payload->>'username' AS username,
-COUNT(*) FILTER (WHERE e.event_type = 'ssh_failed_login')  AS failed_count,
-COUNT(*) FILTER (WHERE e.event_type = 'ssh_login_success') AS success_count
+COUNT(DISTINCT (e.ts, e.payload->>'remote_ip', e.payload->>'username', e.event_type, COALESCE(e.payload->>'raw_line', ''))) FILTER (WHERE e.event_type = 'ssh_failed_login')  AS failed_count,
+COUNT(DISTINCT (e.ts, e.payload->>'remote_ip', e.payload->>'username', e.event_type, COALESCE(e.payload->>'raw_line', ''))) FILTER (WHERE e.event_type = 'ssh_login_success') AS success_count
 FROM raw_events e
 WHERE e.source = 'auth'
   AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
@@ -1608,38 +1608,52 @@ func (s *Server) handleSSHTimeline(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 
 	query := `
-SELECT
-e.ts,
-a.hostname,
-e.event_type,
-e.payload->>'username'  AS username,
-e.payload->>'remote_ip' AS remote_ip,
-COALESCE(e.payload->>'auth_method', '') AS auth_method,
-COALESCE(e.payload->>'is_root', '')      AS is_root_str,
-COALESCE(e.payload->>'dst_port', '')     AS dst_port_str,
-e.payload->>'raw_line'                   AS raw_line
-FROM raw_events e
-JOIN agents a ON e.agent_id = a.id
-WHERE e.source = 'auth'
-  AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
-  AND e.payload->>'remote_ip' = $1
+WITH base AS (
+    SELECT
+        e.ts,
+        a.hostname,
+        e.event_type,
+        e.payload->>'username'  AS username,
+        e.payload->>'remote_ip' AS remote_ip,
+        COALESCE(e.payload->>'auth_method', '') AS auth_method,
+        COALESCE(e.payload->>'is_root', '')      AS is_root_str,
+        COALESCE(e.payload->>'dst_port', '')     AS dst_port_str,
+        COALESCE(e.payload->>'raw_line', '')     AS raw_line
+    FROM raw_events e
+    JOIN agents a ON e.agent_id = a.id
+    WHERE e.source = 'auth'
+      AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
+      AND e.payload->>'remote_ip' = $1
+)
+SELECT DISTINCT ON (ts, remote_ip, username, event_type, raw_line)
+    ts,
+    hostname,
+    event_type,
+    username,
+    remote_ip,
+    auth_method,
+    is_root_str,
+    dst_port_str,
+    raw_line
+FROM base
+WHERE 1=1
 `
 	args := []any{ip}
 	argPos := 2
 
 	if useWindow {
-		query += "  AND e.ts >= now() - ($" + strconv.Itoa(argPos) + "::int || ' minutes')::interval\n"
+		query += " AND ts >= now() - ($" + strconv.Itoa(argPos) + "::int || ' minutes')::interval"
 		args = append(args, windowMinutes)
 		argPos++
 	}
 
 	if username != "" {
-		query += " AND e.payload->>'username' = $" + strconv.Itoa(argPos)
+		query += " AND username = $" + strconv.Itoa(argPos)
 		args = append(args, username)
 		argPos++
 	}
 
-	query += " ORDER BY e.ts DESC LIMIT $" + strconv.Itoa(argPos)
+	query += " ORDER BY ts DESC, remote_ip, username, event_type, raw_line LIMIT $" + strconv.Itoa(argPos)
 	args = append(args, limit)
 
 	rows, err := s.db.Query(ctx, query, args...)
