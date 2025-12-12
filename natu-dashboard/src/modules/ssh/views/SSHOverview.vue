@@ -355,13 +355,27 @@ async function loadSummary() {
     const res = await api.get<any>("/ssh_summary");
 
     const hosts = Array.isArray(res?.hosts) ? res.hosts : [];
-    hostsCount.value = hosts.length;
+    const hostsMap = new Map<string, any>();
+    hosts.forEach((h: any) => {
+      const key = String(h.hostname || h.host || h.agent_id || "host");
+      const existing = hostsMap.get(key);
+      if (!existing) {
+        hostsMap.set(key, h);
+        return;
+      }
 
-    failedTotal.value = hosts.reduce(
+      existing.failed = Math.max(existing.failed ?? 0, h.failed ?? 0);
+      existing.success = Math.max(existing.success ?? 0, h.success ?? 0);
+    });
+
+    const uniqueHosts = Array.from(hostsMap.values());
+    hostsCount.value = uniqueHosts.length;
+
+    failedTotal.value = uniqueHosts.reduce(
       (acc: number, h: any) => acc + (h.failed ?? 0),
       0,
     );
-    successTotal.value = hosts.reduce(
+    successTotal.value = uniqueHosts.reduce(
       (acc: number, h: any) => acc + (h.success ?? 0),
       0,
     );
@@ -371,14 +385,54 @@ async function loadSummary() {
       res?.ips ??
       res?.top_sources ??
       (Array.isArray(res) ? res : []);
-    topIps.value = Array.isArray(ips) ? ips : [];
+    const ipMap = new Map<string, any>();
+    (Array.isArray(ips) ? ips : []).forEach((item: any) => {
+      const ip = item.remote_ip || item.ip;
+      if (!ip) return;
+      const failed = Number(item.failed ?? item.failures ?? 0) || 0;
+      const success = Number(item.success ?? item.successes ?? 0) || 0;
+      const prev = ipMap.get(ip);
+      if (!prev) {
+        ipMap.set(ip, {
+          ...item,
+          remote_ip: ip,
+          failed,
+          success,
+        });
+        return;
+      }
+
+      prev.failed = Math.max(prev.failed ?? 0, failed);
+      prev.success = Math.max(prev.success ?? 0, success);
+    });
+    topIps.value = Array.from(ipMap.values());
 
     const users =
       res?.top_users ??
       res?.users ??
       res?.top_usernames ??
       (Array.isArray(res) ? res : []);
-    topUsers.value = Array.isArray(users) ? users : [];
+    const userMap = new Map<string, any>();
+    (Array.isArray(users) ? users : []).forEach((item: any) => {
+      const user = item.user || item.username;
+      if (!user) return;
+      const failed = Number(item.failed ?? item.failures ?? 0) || 0;
+      const success = Number(item.success ?? item.successes ?? 0) || 0;
+      const prev = userMap.get(user);
+      if (!prev) {
+        userMap.set(user, {
+          ...item,
+          username: user,
+          failed,
+          success,
+        });
+        return;
+      }
+
+      prev.failed = Math.max(prev.failed ?? 0, failed);
+      prev.success = Math.max(prev.success ?? 0, success);
+    });
+    topUsers.value = Array.from(userMap.values());
 
     lastUpdated.value = new Date(res?.generated_at ?? Date.now());
   } catch (e: any) {
@@ -441,7 +495,22 @@ async function loadAggregatedTimeline() {
       return tb - ta; // más reciente primero
     });
 
-    aggregatedTimelineEvents.value = merged;
+    const seen = new Set<string>();
+    const unique: any[] = [];
+
+    merged.forEach((evt) => {
+      const ip = evt._remote_ip || evt.remote_ip || evt.ip || "";
+      const ts = evt.ts || evt.timestamp || evt.time || "";
+      const user = evt.user || evt.username || evt.ssh_user || "";
+      const kind = evt.event_type || evt.type || "";
+      const desc = evt.raw_line || evt.message || evt.msg || "";
+      const key = `${ip}|${ts}|${user}|${kind}|${desc}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      unique.push(evt);
+    });
+
+    aggregatedTimelineEvents.value = unique;
     page.value = 1;
   } catch (e: any) {
     errorTimeline.value = e?.message ?? String(e);
@@ -544,6 +613,14 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   padding: 0.65rem 0.8rem;
   background: linear-gradient(90deg, rgba(30, 41, 59, 0.75), rgba(15, 23, 42, 0.82));
   border-color: rgba(148, 163, 184, 0.32);
+}
+
+.activity-toolbar--accent {
+  padding: 0.55rem 0.8rem;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.16), transparent 45%),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.95), rgba(11, 17, 29, 0.88));
+  border-color: rgba(148, 163, 184, 0.35);
 }
 
 .activity-toolbar--accent {
