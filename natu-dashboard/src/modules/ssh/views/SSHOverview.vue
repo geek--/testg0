@@ -9,54 +9,30 @@
         <span class="tab tab-active">SSH (resumen)</span>
         <a href="/ssh/activity" class="tab">SSH (actividad)</a>
         <a href="/ssh/alerts" class="tab">Alertas SSH</a>
-        <a href="/ssh/sudo" class="tab">Sudo (actividad)</a>
+        <a href="/ssh/reactividad" class="tab">Reactividad</a>
+        <a href="/ssh/sudo" class="tab">Sudo (resumen)</a>
+        <a href="/ssh/sudo/activity" class="tab">Sudo (actividad)</a>
         <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
         <a href="/ssh/criticality" class="tab">Criticidad</a>
       </div>
     </header>
 
     <section class="page">
-      <div class="activity-toolbar">
-        <div class="activity-toolbar__group">
-          <label class="activity-toolbar__label">Ventana (min)</label>
+      <div class="filters-bar">
+        <div class="filters-bar__group">
+          <label class="filters-bar__label">Buscar</label>
           <input
-            v-model.number="selectedWindow"
-            class="activity-toolbar__input"
-            type="number"
-            min="5"
-            max="10080"
+            v-model="filterTerm"
+            class="filters-bar__input"
+            type="text"
+            placeholder="IP, host o usuario"
           />
-          <div class="quick-window">
-            <span class="window-selector__label">Rápidos:</span>
-            <button
-              v-for="m in windowOptions"
-              :key="m"
-              type="button"
-              class="window-selector__btn"
-              :class="{ 'window-selector__btn--active': selectedWindow === m }"
-              @click="onChangeWindow(m)"
-            >
-              <span v-if="m >= 1440">{{ m / 1440 }} día(s)</span>
-              <span v-else>{{ m }} min</span>
-            </button>
-          </div>
-          <button class="btn-secondary" type="button" @click="refreshData(true)">
-            Refrescar ahora
-          </button>
-          <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
-
-        <div class="activity-toolbar__group">
-          <label class="activity-toolbar__label">Auto-refresco</label>
-          <select v-model.number="selectedInterval" class="activity-toolbar__input">
-            <option v-for="opt in intervalOptions" :key="opt" :value="opt">
-              Cada {{ opt }}s
-            </option>
-          </select>
-          <label class="activity-toolbar__toggle">
-            <input type="checkbox" v-model="autoRefreshEnabled" />
-            <span>Activado</span>
-          </label>
+        <div class="filters-bar__actions">
+          <button class="btn-primary" type="button" @click="refreshData(true)">
+            Refrescar
+          </button>
+          <span class="filters-bar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
         </div>
       </div>
 
@@ -169,7 +145,7 @@
       <section style="margin-top: 1rem;">
         <div class="table-card">
           <div class="table-card__title">
-            Timeline SSH (top IPs) — últimos {{ windowMinutes ?? selectedWindow }} min
+            Timeline SSH (top IPs) — últimos {{ windowMinutes ?? WINDOW_MINUTES }} min
           </div>
 
           <!-- Estado timeline -->
@@ -196,7 +172,7 @@
               </thead>
               <tbody>
                 <tr
-                  v-for="(e, idx) in aggregatedTimelineEvents"
+                  v-for="(e, idx) in paginatedTimeline"
                   :key="idx"
                   class="row--clickable"
                   @click="openDetail('Evento SSH', e)"
@@ -222,7 +198,7 @@
 
                 <tr
                   v-else-if="
-                    topIps.length > 0 && aggregatedTimelineEvents.length === 0
+                    topIps.length > 0 && filteredTimeline.length === 0
                   "
                 >
                   <td colspan="7" style="font-size: 0.78rem; color: #9ca3af;">
@@ -233,6 +209,24 @@
                 </tr>
               </tbody>
             </table>
+
+            <div class="pagination" v-if="totalPages > 1">
+              <button
+                class="btn-secondary"
+                type="button"
+                :disabled="page === 1"
+                @click="changePage(page - 1)">
+                Anterior
+              </button>
+              <span class="pagination__label">Página {{ page }} / {{ totalPages }}</span>
+              <button
+                class="btn-secondary"
+                type="button"
+                :disabled="page === totalPages"
+                @click="changePage(page + 1)">
+                Siguiente
+              </button>
+            </div>
           </template>
         </div>
       </section>
@@ -249,35 +243,57 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { api } from "../../../services/api";
 import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
 import EventDetailDrawer from "../../../components/shared/EventDetailDrawer.vue";
 
-const WINDOW_MINUTES = 240;
-
-// opciones de ventana (minutos)
-const windowOptions = [60, 240, 1440];
+const WINDOW_MINUTES = 1440;
 const MAX_TIMELINE_IPS = 5;
-const intervalOptions = [5, 10, 30, 60];
 
 // estado resumen
 const loadingSummary = ref(true);
 const errorSummary = ref<string | null>(null);
-const windowMinutes = ref<number | null>(null);
-const selectedWindow = ref<number>(WINDOW_MINUTES);
+const windowMinutes = ref<number | null>(WINDOW_MINUTES);
 const failedTotal = ref<number>(0);
 const successTotal = ref<number>(0);
 const hostsCount = ref<number>(0);
 const topIps = ref<any[]>([]);
 const topUsers = ref<any[]>([]);
 const lastUpdated = ref<Date | null>(null);
+const filterTerm = ref<string>("");
+const page = ref<number>(1);
+const pageSize = 10;
 
 // timeline agregado
 const loadingTimeline = ref(false);
 const errorTimeline = ref<string | null>(null);
 const aggregatedTimelineEvents = ref<any[]>([]);
+const filteredTimeline = computed(() => {
+  if (!filterTerm.value) return aggregatedTimelineEvents.value;
+  const term = filterTerm.value.toLowerCase();
+  return aggregatedTimelineEvents.value.filter((e) => {
+    return [
+      e.hostname,
+      e.host,
+      e._remote_ip,
+      e.remote_ip,
+      e.ip,
+      e.username,
+      e.user,
+    ]
+      .filter(Boolean)
+      .some((v: string) => String(v).toLowerCase().includes(term));
+  });
+});
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(filteredTimeline.value.length / pageSize)),
+);
+const paginatedTimeline = computed(() => {
+  const start = (page.value - 1) * pageSize;
+  return filteredTimeline.value.slice(start, start + pageSize);
+});
 
 // detalle
 const showDetail = ref(false);
@@ -285,14 +301,7 @@ const detailEvent = ref<any | null>(null);
 const detailTitle = ref("Detalle evento SSH");
 const detailSubtitle = ref("Timeline SSH (top IPs)");
 
-// auto refresh
-const selectedInterval = ref<number>(30);
-const autoRefreshEnabled = ref<boolean>(true);
-let refreshHandle: number | null = null;
-
-const windowLabel = computed(
-  () => `${windowMinutes.value ?? selectedWindow.value} min`,
-);
+const windowLabel = computed(() => `${windowMinutes.value ?? WINDOW_MINUTES} min`);
 
 const lastUpdatedLabel = computed(() => {
   if (!lastUpdated.value) return "—";
@@ -332,13 +341,13 @@ async function loadSummary() {
 
   try {
     const res = await api.get<any>("/ssh_summary", {
-      minutes: selectedWindow.value,
+      minutes: WINDOW_MINUTES,
     });
 
     if (typeof res?.window_minutes === "number") {
       windowMinutes.value = res.window_minutes;
     } else {
-      windowMinutes.value = selectedWindow.value;
+      windowMinutes.value = WINDOW_MINUTES;
     }
 
     const hosts = Array.isArray(res?.hosts) ? res.hosts : [];
@@ -379,7 +388,6 @@ async function loadAggregatedTimeline() {
   aggregatedTimelineEvents.value = [];
 
   if (!topIps.value.length) {
-    // no hay IPs de referencia, no podemos construir timeline genérico
     return;
   }
 
@@ -387,7 +395,7 @@ async function loadAggregatedTimeline() {
   errorTimeline.value = null;
 
   try {
-    const minutes = windowMinutes.value ?? selectedWindow.value;
+    const minutes = windowMinutes.value ?? WINDOW_MINUTES;
 
     const ips = topIps.value
       .map((r: any) => r.remote_ip || r.ip)
@@ -440,11 +448,6 @@ async function loadAggregatedTimeline() {
   }
 }
 
-async function onChangeWindow(minutes: number) {
-  if (selectedWindow.value === minutes) return;
-  selectedWindow.value = minutes;
-}
-
 async function refreshData(refreshTimeline: boolean) {
   await loadSummary();
   if (refreshTimeline) {
@@ -460,37 +463,18 @@ function openDetail(title: string, evt: any, subtitle?: string) {
   showDetail.value = true;
 }
 
-watch(selectedWindow, () => {
-  void refreshData(true);
-});
-
-function clearAutoRefresh() {
-  if (refreshHandle) {
-    window.clearInterval(refreshHandle);
-    refreshHandle = null;
-  }
+function changePage(next: number) {
+  const maxPage = totalPages.value;
+  if (next < 1 || next > maxPage) return;
+  page.value = next;
 }
-
-function setupAutoRefresh() {
-  clearAutoRefresh();
-  if (!autoRefreshEnabled.value) return;
-
-  refreshHandle = window.setInterval(() => {
-    void refreshData(true);
-  }, selectedInterval.value * 1000);
-}
-
-watch([selectedInterval, autoRefreshEnabled], () => {
-  setupAutoRefresh();
-});
 
 onMounted(() => {
   void refreshData(true);
-  setupAutoRefresh();
 });
 
-onBeforeUnmount(() => {
-  clearAutoRefresh();
+watch(filterTerm, () => {
+  page.value = 1;
 });
 </script>
 
