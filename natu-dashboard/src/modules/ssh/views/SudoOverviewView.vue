@@ -211,7 +211,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { api } from "../../../services/api";
 import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";

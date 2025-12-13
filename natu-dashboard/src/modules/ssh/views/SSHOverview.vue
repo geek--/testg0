@@ -255,7 +255,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { api } from "../../../services/api";
 import StatCard from "../../../components/shared/StatCard.vue";
 import LoadingSpinner from "../../../components/shared/LoadingSpinner.vue";
@@ -562,8 +562,24 @@ onMounted(() => {
   scheduleAutoRefresh();
 });
 
-onBeforeUnmount(() => {
-  clearAutoRefresh();
+watch([autoRefreshEnabled, selectedInterval], () => {
+  scheduleAutoRefresh();
+});
+
+watch(filterTerm, () => {
+  page.value = 1;
+});
+
+watch([autoRefreshEnabled, selectedInterval], () => {
+  scheduleAutoRefresh();
+});
+
+watch(filterTerm, () => {
+  page.value = 1;
+});
+
+watch([autoRefreshEnabled, selectedInterval], () => {
+  scheduleAutoRefresh();
 });
 
 watch(filterTerm, () => {
@@ -602,10 +618,41 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
-  padding: 0.45rem 0.6rem;
+  padding: 0.65rem 0.85rem;
   border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 0.75rem;
-  background: rgba(15, 23, 42, 0.6);
+  border-radius: 0.9rem;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.82));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.activity-toolbar--padded {
+  padding: 0.65rem 0.8rem;
+  background: linear-gradient(90deg, rgba(30, 41, 59, 0.75), rgba(15, 23, 42, 0.82));
+  border-color: rgba(148, 163, 184, 0.32);
+}
+
+.activity-toolbar--accent {
+  padding: 0.55rem 0.8rem;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.16), transparent 45%),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.95), rgba(11, 17, 29, 0.88));
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.activity-toolbar--accent {
+  padding: 0.55rem 0.8rem;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.16), transparent 45%),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.95), rgba(11, 17, 29, 0.88));
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.activity-toolbar--accent {
+  padding: 0.55rem 0.8rem;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.16), transparent 45%),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.95), rgba(11, 17, 29, 0.88));
+  border-color: rgba(148, 163, 184, 0.35);
 }
 
 .activity-toolbar--accent {
@@ -619,7 +666,7 @@ watch([autoRefreshEnabled, selectedInterval], () => {
 .activity-toolbar__group {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   flex-wrap: wrap;
 }
 
@@ -633,12 +680,12 @@ watch([autoRefreshEnabled, selectedInterval], () => {
 }
 
 .activity-toolbar__input {
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  border-radius: 0.5rem;
-  padding: 0.3rem 0.5rem;
+  background: rgba(17, 24, 39, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.55rem;
+  padding: 0.38rem 0.6rem;
   color: #e2e8f0;
-  min-width: 90px;
+  min-width: 96px;
 }
 
 .activity-toolbar__hint {
@@ -652,6 +699,115 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   gap: 0.35rem;
   font-size: 0.9rem;
   color: #e2e8f0;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.45rem;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.filters-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: radial-gradient(
+      circle at top left,
+      rgba(56, 189, 248, 0.08),
+      transparent
+    ),
+    rgba(15, 23, 42, 0.9);
+}
+
+.filters-bar--compact {
+  margin-bottom: 0.65rem;
+}
+
+.filters-bar__group {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+
+.filters-bar__label {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-bottom: 0.25rem;
+}
+
+.filters-bar__input {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  color: #e5e7eb;
+}
+
+.filters-bar__input::placeholder {
+  color: #6b7280;
+}
+
+.filters-bar__actions {
+  margin-left: auto;
+}
+
+.filters-bar__hint {
+  font-size: 0.72rem;
+  color: #9ca3af;
+}
+
+.filters-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: radial-gradient(
+      circle at top left,
+      rgba(56, 189, 248, 0.08),
+      transparent
+    ),
+    rgba(15, 23, 42, 0.9);
+}
+
+.filters-bar--compact {
+  margin-bottom: 0.65rem;
+}
+
+.filters-bar__group {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+
+.filters-bar__label {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-bottom: 0.25rem;
+}
+
+.filters-bar__input {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  color: #e5e7eb;
+}
+
+.filters-bar__input::placeholder {
+  color: #6b7280;
+}
+
+.filters-bar__actions {
+  margin-left: auto;
+}
+
+.filters-bar__hint {
+  font-size: 0.72rem;
+  color: #9ca3af;
 }
 
 .filters-bar {
