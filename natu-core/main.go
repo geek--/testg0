@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -27,6 +28,7 @@ type Event struct {
 
 type BatchRequest struct {
 	AgentSecret string  `json:"agent_secret"`
+	Hostname    string  `json:"hostname,omitempty"`
 	Events      []Event `json:"events"`
 }
 
@@ -205,6 +207,38 @@ type SudoAlertUpdateRequest struct {
 }
 
 // ----------------------------
+// SSH bans (Fail2ban/ipset)
+// ----------------------------
+
+type SSHBan struct {
+	Hostname string     `json:"hostname"`
+	IP       string     `json:"ip"`
+	Jail     string     `json:"jail"`
+	BannedAt *time.Time `json:"banned_at,omitempty"`
+	Reason   string     `json:"reason,omitempty"`
+	Source   string     `json:"source,omitempty"`
+	SyncedAt time.Time  `json:"synced_at"`
+}
+
+type SSHBanSyncRequest struct {
+	AgentSecret string `json:"agent_secret"`
+	Hostname    string `json:"hostname"`
+	Bans        []struct {
+		IP       string     `json:"ip"`
+		Jail     string     `json:"jail"`
+		BannedAt *time.Time `json:"banned_at,omitempty"`
+		Reason   string     `json:"reason,omitempty"`
+		Source   string     `json:"source,omitempty"`
+	} `json:"bans"`
+}
+
+type SSHBanResponse struct {
+	WindowMinutes int       `json:"window_minutes"`
+	GeneratedAt   time.Time `json:"generated_at"`
+	Bans          []SSHBan  `json:"bans"`
+}
+
+// ----------------------------
 // Constantes de reglas
 // ----------------------------
 
@@ -254,6 +288,10 @@ func main() {
 	}
 	defer pool.Close()
 
+	if err := ensureBanTable(ctx, pool); err != nil {
+		log.Fatalf("Error asegurando tabla ssh_bans_state: %v", err)
+	}
+
 	srv := &Server{db: pool}
 
 	mux := http.NewServeMux()
@@ -268,6 +306,7 @@ func main() {
 	mux.HandleFunc("/api/v1/sudo_timeline", srv.handleSudoTimeline)
 	mux.HandleFunc("/api/v1/sudo_alerts", srv.handleSudoAlerts)
 	mux.HandleFunc("/api/v1/sudo_alerts/", srv.handleSudoAlerts)
+	mux.HandleFunc("/api/v1/ssh_bans", srv.handleSSHBans)
 
 	// Workers
 	srv.startSSHAlertWorker(SSHAlertWindowMinutes, SSHAlertFailedThreshold)
@@ -280,6 +319,54 @@ func main() {
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("Error en servidor HTTP: %v", err)
 	}
+}
+
+func ensureBanTable(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, `
+        CREATE TABLE IF NOT EXISTS ssh_bans_state (
+            agent_id uuid REFERENCES agents(id) ON DELETE CASCADE,
+            ip text NOT NULL,
+            jail text NOT NULL DEFAULT 'sshd',
+            banned_at timestamptz,
+            reason text,
+            source text,
+            synced_at timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (agent_id, ip, jail)
+        );
+    `)
+	return err
+}
+
+func (s *Server) ensureAgent(ctx context.Context, secret, hostname string) (string, error) {
+	var agentID string
+	err := s.db.QueryRow(ctx, `
+        SELECT id::text
+        FROM agents
+        WHERE secret = $1
+    `, secret).Scan(&agentID)
+	if err == nil {
+		_, _ = s.db.Exec(ctx, `
+            UPDATE agents
+            SET last_seen = now(), hostname = COALESCE(NULLIF($2, ''), hostname)
+            WHERE id = $3
+        `, hostname, agentID)
+		return agentID, nil
+	}
+
+	if hostname == "" {
+		return "", fmt.Errorf("agente no encontrado y hostname no provisto")
+	}
+
+	err = s.db.QueryRow(ctx, `
+        INSERT INTO agents (hostname, secret)
+        VALUES ($1, $2)
+        RETURNING id::text
+    `, hostname, secret).Scan(&agentID)
+	if err != nil {
+		return "", err
+	}
+
+	return agentID, nil
 }
 
 // ----------------------------------------------------
@@ -304,19 +391,12 @@ func (s *Server) handleBatchEvents(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	var agentID string
-	err := s.db.QueryRow(ctx, `
-        SELECT id::text
-        FROM agents
-        WHERE secret = $1
-    `, req.AgentSecret).Scan(&agentID)
+	agentID, err := s.ensureAgent(ctx, req.AgentSecret, req.Hostname)
 	if err != nil {
-		log.Printf("❌ Error buscando agente: secret='%s', err=%v", req.AgentSecret, err)
+		log.Printf("❌ Error asegurando agente: secret='%s', err=%v", req.AgentSecret, err)
 		http.Error(w, "agente no encontrado o secret inválido", http.StatusUnauthorized)
 		return
 	}
-
-	_, _ = s.db.Exec(ctx, `UPDATE agents SET last_seen = now() WHERE id = $1`, agentID)
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -359,6 +439,143 @@ func (s *Server) handleBatchEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------
+// Bans SSH (Fail2ban/ipset)
+// ----------------------------------------------------
+
+func (s *Server) handleSSHBans(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		s.handlePostSSHBans(w, r)
+	case http.MethodGet:
+		s.handleGetSSHBans(w, r)
+	default:
+		http.Error(w, "solo GET/POST", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handlePostSSHBans(w http.ResponseWriter, r *http.Request) {
+	var req SSHBanSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "JSON inválido", http.StatusBadRequest)
+		return
+	}
+
+	if req.AgentSecret == "" {
+		http.Error(w, "agent_secret requerido", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	agentID, err := s.ensureAgent(ctx, req.AgentSecret, req.Hostname)
+	if err != nil {
+		http.Error(w, "agente no encontrado o secret inválido", http.StatusUnauthorized)
+		return
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		http.Error(w, "error iniciando transacción", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM ssh_bans_state WHERE agent_id = $1`, agentID); err != nil {
+		http.Error(w, "error limpiando bans previos", http.StatusInternalServerError)
+		return
+	}
+
+	for _, ban := range req.Bans {
+		if ban.IP == "" {
+			continue
+		}
+
+		jail := ban.Jail
+		if jail == "" {
+			jail = "sshd"
+		}
+
+		_, err := tx.Exec(ctx, `
+            INSERT INTO ssh_bans_state (agent_id, ip, jail, banned_at, reason, source, synced_at)
+            VALUES ($1, $2, $3, $4, $5, $6, now())
+        `, agentID, ban.IP, jail, ban.BannedAt, ban.Reason, ban.Source)
+		if err != nil {
+			http.Error(w, "error guardando bans", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		http.Error(w, "error commit bans", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+func (s *Server) handleGetSSHBans(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	minStr := q.Get("minutes")
+	windowMinutes := 1440
+	if minStr != "" {
+		if v, err := strconv.Atoi(minStr); err == nil && v > 0 && v <= 10080 {
+			windowMinutes = v
+		}
+	}
+
+	ctx := r.Context()
+	now := time.Now().UTC()
+
+	rows, err := s.db.Query(ctx, `
+        SELECT b.ip, b.jail, b.banned_at, b.reason, b.source, b.synced_at, a.hostname
+        FROM ssh_bans_state b
+        JOIN agents a ON b.agent_id = a.id
+        WHERE b.synced_at >= now() - ($1::int || ' minutes')::interval
+        ORDER BY COALESCE(b.banned_at, b.synced_at) DESC;
+    `, windowMinutes)
+	if err != nil {
+		http.Error(w, "error consultando bans", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var bans []SSHBan
+	for rows.Next() {
+		var b SSHBan
+		if err := rows.Scan(&b.IP, &b.Jail, &b.BannedAt, &b.Reason, &b.Source, &b.SyncedAt, &b.Hostname); err != nil {
+			http.Error(w, "error leyendo bans", http.StatusInternalServerError)
+			return
+		}
+		bans = append(bans, b)
+	}
+
+	if rows.Err() != nil {
+		http.Error(w, "error final leyendo bans", http.StatusInternalServerError)
+		return
+	}
+
+	if bans == nil {
+		bans = []SSHBan{}
+	}
+
+	resp := SSHBanResponse{
+		WindowMinutes: windowMinutes,
+		GeneratedAt:   now,
+		Bans:          bans,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(resp); err != nil {
+		http.Error(w, "error serializando respuesta", http.StatusInternalServerError)
+		return
+	}
+}
+
+// ----------------------------------------------------
 // Resumen SSH
 // ----------------------------------------------------
 
@@ -370,29 +587,67 @@ func (s *Server) handleSSHSummary(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	minStr := q.Get("minutes")
-	windowMinutes := 60
+	windowMinutes := 0
+	useWindow := false
 	if minStr != "" {
 		if v, err := strconv.Atoi(minStr); err == nil && v > 0 && v <= 1440 {
 			windowMinutes = v
+			useWindow = true
 		}
 	}
 
 	ctx := r.Context()
 	now := time.Now().UTC()
 
+	windowClause := ""
+	if useWindow {
+		windowClause = " AND e.ts >= now() - ($1::int || ' minutes')::interval"
+	}
+
+	commonCTE := fmt.Sprintf(`
+WITH base AS (
+    SELECT
+        e.ts,
+        a.hostname,
+        e.event_type,
+        e.payload->>'username'  AS username,
+        e.payload->>'remote_ip' AS remote_ip,
+        COALESCE(e.payload->>'raw_line', '') AS raw_line
+    FROM raw_events e
+    JOIN agents a ON e.agent_id = a.id
+    WHERE e.source = 'auth'
+      AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
+      %s
+),
+dedup AS (
+    SELECT DISTINCT ON (ts, remote_ip, username, event_type, raw_line, hostname)
+        ts,
+        hostname,
+        event_type,
+        username,
+        remote_ip,
+        raw_line
+    FROM base
+    ORDER BY ts DESC, remote_ip, username, event_type, raw_line, hostname
+)
+`, windowClause)
+
+	hostQuery := commonCTE + `
+SELECT hostname,
+       COUNT(*) FILTER (WHERE event_type = 'ssh_failed_login')  AS failed,
+       COUNT(*) FILTER (WHERE event_type = 'ssh_login_success') AS success
+FROM dedup
+GROUP BY hostname
+ORDER BY hostname;
+`
+
+	hostArgs := []any{}
+	if useWindow {
+		hostArgs = append(hostArgs, windowMinutes)
+	}
+
 	var hosts []SSHHostSummary
-	rows, err := s.db.Query(ctx, `
-        SELECT a.hostname,
-               COALESCE(SUM(CASE WHEN e.event_type = 'ssh_failed_login'  THEN 1 ELSE 0 END), 0) AS failed,
-               COALESCE(SUM(CASE WHEN e.event_type = 'ssh_login_success' THEN 1 ELSE 0 END), 0) AS success
-        FROM raw_events e
-        JOIN agents a ON e.agent_id = a.id
-        WHERE e.source = 'auth'
-          AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
-          AND e.ts >= now() - ($1::int || ' minutes')::interval
-        GROUP BY a.hostname
-        ORDER BY a.hostname;
-    `, windowMinutes)
+	rows, err := s.db.Query(ctx, hostQuery, hostArgs...)
 	if err != nil {
 		log.Printf("Error consultando resumen por host: %v", err)
 		http.Error(w, "error consultando resumen por host", http.StatusInternalServerError)
@@ -419,20 +674,24 @@ func (s *Server) handleSSHSummary(w http.ResponseWriter, r *http.Request) {
 		hosts = []SSHHostSummary{}
 	}
 
+	topIPQuery := commonCTE + `
+SELECT remote_ip,
+       COUNT(*) AS failed_count
+FROM dedup
+WHERE event_type = 'ssh_failed_login'
+  AND remote_ip IS NOT NULL
+GROUP BY remote_ip
+ORDER BY failed_count DESC
+LIMIT 10;
+`
+
+	ipArgs := []any{}
+	if useWindow {
+		ipArgs = append(ipArgs, windowMinutes)
+	}
+
 	var topIPs []SSHTopIP
-	rows, err = s.db.Query(ctx, `
-        SELECT
-            e.payload->>'remote_ip' AS remote_ip,
-            COUNT(*) AS failed_count
-        FROM raw_events e
-        WHERE e.source = 'auth'
-          AND e.event_type = 'ssh_failed_login'
-          AND e.ts >= now() - ($1::int || ' minutes')::interval
-          AND e.payload ? 'remote_ip'
-        GROUP BY remote_ip
-        ORDER BY failed_count DESC
-        LIMIT 10;
-    `, windowMinutes)
+	rows, err = s.db.Query(ctx, topIPQuery, ipArgs...)
 	if err != nil {
 		log.Printf("Error consultando top IPs: %v", err)
 		http.Error(w, "error consultando top IPs", http.StatusInternalServerError)
@@ -459,21 +718,24 @@ func (s *Server) handleSSHSummary(w http.ResponseWriter, r *http.Request) {
 		topIPs = []SSHTopIP{}
 	}
 
+	userQuery := commonCTE + `
+SELECT username,
+       COUNT(*) FILTER (WHERE event_type = 'ssh_failed_login')  AS failed_count,
+       COUNT(*) FILTER (WHERE event_type = 'ssh_login_success') AS success_count
+FROM dedup
+WHERE username IS NOT NULL
+GROUP BY username
+ORDER BY failed_count DESC, success_count DESC
+LIMIT 10;
+`
+
+	userArgs := []any{}
+	if useWindow {
+		userArgs = append(userArgs, windowMinutes)
+	}
+
 	var topUsers []SSHTopUser
-	rows, err = s.db.Query(ctx, `
-        SELECT
-            e.payload->>'username' AS username,
-            COUNT(*) FILTER (WHERE e.event_type = 'ssh_failed_login')  AS failed_count,
-            COUNT(*) FILTER (WHERE e.event_type = 'ssh_login_success') AS success_count
-        FROM raw_events e
-        WHERE e.source = 'auth'
-          AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
-          AND e.ts >= now() - ($1::int || ' minutes')::interval
-          AND e.payload ? 'username'
-        GROUP BY username
-        ORDER BY failed_count DESC, success_count DESC
-        LIMIT 10;
-    `, windowMinutes)
+	rows, err = s.db.Query(ctx, userQuery, userArgs...)
 	if err != nil {
 		log.Printf("Error consultando top usuarios: %v", err)
 		http.Error(w, "error consultando top usuarios", http.StatusInternalServerError)
@@ -1346,10 +1608,12 @@ func (s *Server) handleSSHTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	windowMinutes := 60
+	windowMinutes := 0
+	useWindow := false
 	if minStr != "" {
 		if v, err := strconv.Atoi(minStr); err == nil && v > 0 && v <= 10080 {
 			windowMinutes = v
+			useWindow = true
 		}
 	}
 
@@ -1364,33 +1628,52 @@ func (s *Server) handleSSHTimeline(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 
 	query := `
-        SELECT DISTINCT
-            e.ts,
-            a.hostname,
-            e.event_type,
-            e.payload->>'username'  AS username,
-            e.payload->>'remote_ip' AS remote_ip,
-            COALESCE(e.payload->>'auth_method', '') AS auth_method,
-            COALESCE(e.payload->>'is_root', '')      AS is_root_str,
-            COALESCE(e.payload->>'dst_port', '')     AS dst_port_str,
-            e.payload->>'raw_line'                   AS raw_line
-        FROM raw_events e
-        JOIN agents a ON e.agent_id = a.id
-        WHERE e.source = 'auth'
-          AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
-          AND e.ts >= now() - ($1::int || ' minutes')::interval
-          AND e.payload->>'remote_ip' = $2
-    `
-	args := []any{windowMinutes, ip}
-	argPos := 3
+WITH base AS (
+    SELECT
+        e.ts,
+        a.hostname,
+        e.event_type,
+        e.payload->>'username'  AS username,
+        e.payload->>'remote_ip' AS remote_ip,
+        COALESCE(e.payload->>'auth_method', '') AS auth_method,
+        COALESCE(e.payload->>'is_root', '')      AS is_root_str,
+        COALESCE(e.payload->>'dst_port', '')     AS dst_port_str,
+        COALESCE(e.payload->>'raw_line', '')     AS raw_line
+    FROM raw_events e
+    JOIN agents a ON e.agent_id = a.id
+    WHERE e.source = 'auth'
+      AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
+      AND e.payload->>'remote_ip' = $1
+)
+SELECT DISTINCT ON (ts, remote_ip, username, event_type, raw_line)
+    ts,
+    hostname,
+    event_type,
+    username,
+    remote_ip,
+    auth_method,
+    is_root_str,
+    dst_port_str,
+    raw_line
+FROM base
+WHERE 1=1
+`
+	args := []any{ip}
+	argPos := 2
+
+	if useWindow {
+		query += " AND ts >= now() - ($" + strconv.Itoa(argPos) + "::int || ' minutes')::interval"
+		args = append(args, windowMinutes)
+		argPos++
+	}
 
 	if username != "" {
-		query += " AND e.payload->>'username' = $" + strconv.Itoa(argPos)
+		query += " AND username = $" + strconv.Itoa(argPos)
 		args = append(args, username)
 		argPos++
 	}
 
-	query += " ORDER BY e.ts ASC LIMIT $" + strconv.Itoa(argPos)
+	query += " ORDER BY ts DESC, remote_ip, username, event_type, raw_line LIMIT $" + strconv.Itoa(argPos)
 	args = append(args, limit)
 
 	rows, err := s.db.Query(ctx, query, args...)
