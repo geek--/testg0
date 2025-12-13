@@ -599,26 +599,55 @@ func (s *Server) handleSSHSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	now := time.Now().UTC()
 
-	var hosts []SSHHostSummary
-	baseQuery := `
-SELECT a.hostname,
-       COUNT(DISTINCT (e.ts, e.payload->>'remote_ip', e.payload->>'username', e.event_type, COALESCE(e.payload->>'raw_line', ''))) FILTER (WHERE e.event_type = 'ssh_failed_login')  AS failed,
-       COUNT(DISTINCT (e.ts, e.payload->>'remote_ip', e.payload->>'username', e.event_type, COALESCE(e.payload->>'raw_line', ''))) FILTER (WHERE e.event_type = 'ssh_login_success') AS success
-FROM raw_events e
-JOIN agents a ON e.agent_id = a.id
-WHERE e.source = 'auth'
-  AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
+	windowClause := ""
+	if useWindow {
+		windowClause = " AND e.ts >= now() - ($1::int || ' minutes')::interval"
+	}
+
+	commonCTE := fmt.Sprintf(`
+WITH base AS (
+    SELECT
+        e.ts,
+        a.hostname,
+        e.event_type,
+        e.payload->>'username'  AS username,
+        e.payload->>'remote_ip' AS remote_ip,
+        COALESCE(e.payload->>'raw_line', '') AS raw_line
+    FROM raw_events e
+    JOIN agents a ON e.agent_id = a.id
+    WHERE e.source = 'auth'
+      AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
+      %s
+),
+dedup AS (
+    SELECT DISTINCT ON (ts, remote_ip, username, event_type, raw_line, hostname)
+        ts,
+        hostname,
+        event_type,
+        username,
+        remote_ip,
+        raw_line
+    FROM base
+    ORDER BY ts DESC, remote_ip, username, event_type, raw_line, hostname
+)
+`, windowClause)
+
+	hostQuery := commonCTE + `
+SELECT hostname,
+       COUNT(*) FILTER (WHERE event_type = 'ssh_failed_login')  AS failed,
+       COUNT(*) FILTER (WHERE event_type = 'ssh_login_success') AS success
+FROM dedup
+GROUP BY hostname
+ORDER BY hostname;
 `
 
 	hostArgs := []any{}
 	if useWindow {
-		baseQuery += "  AND e.ts >= now() - ($1::int || ' minutes')::interval\n"
 		hostArgs = append(hostArgs, windowMinutes)
 	}
 
-	baseQuery += "\tGROUP BY a.hostname\n\tORDER BY a.hostname;\n"
-
-	rows, err := s.db.Query(ctx, baseQuery, hostArgs...)
+	var hosts []SSHHostSummary
+	rows, err := s.db.Query(ctx, hostQuery, hostArgs...)
 	if err != nil {
 		log.Printf("Error consultando resumen por host: %v", err)
 		http.Error(w, "error consultando resumen por host", http.StatusInternalServerError)
@@ -645,27 +674,23 @@ WHERE e.source = 'auth'
 		hosts = []SSHHostSummary{}
 	}
 
-	var topIPs []SSHTopIP
-	topIPQuery := `
-SELECT
-e.payload->>'remote_ip' AS remote_ip,
-COUNT(DISTINCT (e.ts, e.payload->>'remote_ip', e.payload->>'username', e.event_type, COALESCE(e.payload->>'raw_line', ''))) AS failed_count
-FROM raw_events e
-WHERE e.source = 'auth'
-  AND e.event_type = 'ssh_failed_login'
-  AND e.payload ? 'remote_ip'
+	topIPQuery := commonCTE + `
+SELECT remote_ip,
+       COUNT(*) AS failed_count
+FROM dedup
+WHERE event_type = 'ssh_failed_login'
+  AND remote_ip IS NOT NULL
+GROUP BY remote_ip
+ORDER BY failed_count DESC
+LIMIT 10;
 `
 
 	ipArgs := []any{}
-	ipPos := 1
 	if useWindow {
-		topIPQuery += "  AND e.ts >= now() - ($" + strconv.Itoa(ipPos) + "::int || ' minutes')::interval\n"
 		ipArgs = append(ipArgs, windowMinutes)
-		ipPos++
 	}
 
-	topIPQuery += "\tGROUP BY remote_ip\n\tORDER BY failed_count DESC\n\tLIMIT 10;\n"
-
+	var topIPs []SSHTopIP
 	rows, err = s.db.Query(ctx, topIPQuery, ipArgs...)
 	if err != nil {
 		log.Printf("Error consultando top IPs: %v", err)
@@ -693,28 +718,23 @@ WHERE e.source = 'auth'
 		topIPs = []SSHTopIP{}
 	}
 
-	var topUsers []SSHTopUser
-	userQuery := `
-SELECT
-e.payload->>'username' AS username,
-COUNT(DISTINCT (e.ts, e.payload->>'remote_ip', e.payload->>'username', e.event_type, COALESCE(e.payload->>'raw_line', ''))) FILTER (WHERE e.event_type = 'ssh_failed_login')  AS failed_count,
-COUNT(DISTINCT (e.ts, e.payload->>'remote_ip', e.payload->>'username', e.event_type, COALESCE(e.payload->>'raw_line', ''))) FILTER (WHERE e.event_type = 'ssh_login_success') AS success_count
-FROM raw_events e
-WHERE e.source = 'auth'
-  AND e.event_type IN ('ssh_failed_login', 'ssh_login_success')
-  AND e.payload ? 'username'
+	userQuery := commonCTE + `
+SELECT username,
+       COUNT(*) FILTER (WHERE event_type = 'ssh_failed_login')  AS failed_count,
+       COUNT(*) FILTER (WHERE event_type = 'ssh_login_success') AS success_count
+FROM dedup
+WHERE username IS NOT NULL
+GROUP BY username
+ORDER BY failed_count DESC, success_count DESC
+LIMIT 10;
 `
 
 	userArgs := []any{}
-	userPos := 1
 	if useWindow {
-		userQuery += "  AND e.ts >= now() - ($" + strconv.Itoa(userPos) + "::int || ' minutes')::interval\n"
 		userArgs = append(userArgs, windowMinutes)
-		userPos++
 	}
 
-	userQuery += "\tGROUP BY username\n\tORDER BY failed_count DESC, success_count DESC\n\tLIMIT 10;\n"
-
+	var topUsers []SSHTopUser
 	rows, err = s.db.Query(ctx, userQuery, userArgs...)
 	if err != nil {
 		log.Printf("Error consultando top usuarios: %v", err)

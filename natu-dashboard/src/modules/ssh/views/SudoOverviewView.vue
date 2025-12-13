@@ -1,22 +1,46 @@
 <template>
   <div class="page">
-    <header class="page-header">
-      <h1 class="page-header__title">Sudo · Resumen</h1>
-      <p class="page-header__subtitle">
-        Visión general de ejecuciones sudo, usuarios y comandos elevados en el
-        servidor isov3.
-      </p>
-      <div class="tabs">
-        <a href="/ssh" class="tab">SSH (resumen)</a>
-        <a href="/ssh/activity" class="tab">SSH (actividad)</a>
-        <a href="/ssh/alerts" class="tab">Alertas SSH</a>
-        <a href="/ssh/reactividad" class="tab">Reactividad</a>
-        <span class="tab tab-active">Sudo (resumen)</span>
-        <a href="/ssh/sudo/activity" class="tab">Sudo (actividad)</a>
-        <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
-        <a href="/ssh/criticality" class="tab">Criticidad</a>
+    <div class="page-sticky">
+      <header class="page-header">
+        <h1 class="page-header__title">Sudo · Resumen</h1>
+        <p class="page-header__subtitle">
+          Visión general de ejecuciones sudo, usuarios y comandos elevados en el
+          servidor isov3.
+        </p>
+        <div class="tabs">
+          <a href="/ssh" class="tab">SSH (resumen)</a>
+          <a href="/ssh/activity" class="tab">SSH (actividad)</a>
+          <a href="/ssh/alerts" class="tab">Alertas SSH</a>
+          <a href="/ssh/reactividad" class="tab">Reactividad</a>
+          <span class="tab tab-active">Sudo (resumen)</span>
+          <a href="/ssh/sudo/activity" class="tab">Sudo (actividad)</a>
+          <a href="/ssh/sudo-alerts" class="tab">Alertas sudo</a>
+          <a href="/ssh/criticality" class="tab">Criticidad</a>
+        </div>
+      </header>
+
+      <div class="activity-toolbar activity-toolbar--accent">
+        <div class="activity-toolbar__group">
+          <button class="btn-secondary" type="button" @click="refreshData(true)">
+            Refrescar ahora
+          </button>
+          <span class="activity-toolbar__hint">Actualizado: {{ lastUpdatedLabel }}</span>
+        </div>
+
+        <div class="activity-toolbar__group activity-toolbar__group--compact">
+          <label class="activity-toolbar__label">Auto-refresco</label>
+          <select v-model.number="selectedInterval" class="activity-toolbar__input">
+            <option v-for="opt in intervalOptions" :key="opt" :value="opt">
+              Cada {{ opt }}s
+            </option>
+          </select>
+          <label class="activity-toolbar__toggle">
+            <input type="checkbox" v-model="autoRefreshEnabled" />
+            <span>Activado</span>
+          </label>
+        </div>
       </div>
-    </header>
+    </div>
 
     <!-- Filtros -->
     <section class="page" style="margin-bottom: 0.75rem;">
@@ -59,18 +83,6 @@
       </p>
     </section>
 
-    <div class="filters-bar" style="margin-top: 0.5rem;">
-      <div class="filters-bar__group">
-        <label class="filters-bar__label">Actualizado</label>
-        <span class="filters-bar__hint">{{ lastUpdatedLabel }}</span>
-      </div>
-      <div class="filters-bar__actions">
-        <button class="btn-primary" type="button" @click="refreshData()">
-          Refrescar
-        </button>
-      </div>
-    </div>
-
     <!-- Estado: cargando -->
     <section v-if="loading" class="section--loading">
       <LoadingSpinner /> Cargando actividad de sudo...
@@ -86,27 +98,27 @@
       <!-- Cards resumen -->
       <div class="stats-grid">
         <StatCard
-          title="Ventana analizada"
-          :value="(windowMinutes ?? WINDOW_MINUTES) + ' min'"
-          subtitle="Parámetro minutes en /api/v1/sudo_timeline"
-        />
-
-        <StatCard
           title="Ejecuciones sudo"
           :value="events.length"
-          subtitle="Total de eventos sudo registrados en la ventana"
+          subtitle="Total de eventos sudo registrados"
         />
 
         <StatCard
           title="Usuarios con sudo"
           :value="usersSummary.length"
-          subtitle="Cantidad de usuarios (sudo_user) que usaron sudo en estos eventos"
+          subtitle="Cantidad de usuarios (sudo_user) que usaron sudo"
         />
 
         <StatCard
           title="Comandos distintos"
           :value="distinctCommands"
           subtitle="Número aproximado de binarios/comandos usados con sudo"
+        />
+
+        <StatCard
+          title="Hosts monitoreados"
+          :value="hostsCount"
+          subtitle="Agentes/hosts que enviaron eventos sudo"
         />
       </div>
 
@@ -209,6 +221,10 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 const windowMinutes = ref<number>(240);
 const lastUpdated = ref<Date | null>(null);
+const intervalOptions = [3, 5, 15, 30, 60];
+const selectedInterval = ref<number>(5);
+const autoRefreshEnabled = ref<boolean>(true);
+let refreshTimer: number | undefined;
 
 const events = ref<any[]>([]);
 
@@ -261,6 +277,15 @@ const distinctCommands = computed(() => {
   for (const e of events.value) {
     const cmd = (e.command || e.cmd || e.binary) as string | undefined;
     if (cmd) set.add(cmd);
+  }
+  return set.size;
+});
+
+const hostsCount = computed(() => {
+  const set = new Set<string>();
+  for (const e of events.value) {
+    const host = (e.hostname || e.host || "") as string;
+    if (host) set.add(host);
   }
   return set.size;
 });
@@ -320,12 +345,31 @@ async function loadData() {
   }
 }
 
-function onApplyFilters() {
-  void refreshData();
+function refreshData(manual = false) {
+  void loadData();
+  if (manual) {
+    clearAutoRefresh();
+    scheduleAutoRefresh();
+  }
 }
 
-async function refreshData() {
-  await loadData();
+function clearAutoRefresh() {
+  if (refreshTimer) {
+    window.clearInterval(refreshTimer);
+    refreshTimer = undefined;
+  }
+}
+
+function scheduleAutoRefresh() {
+  clearAutoRefresh();
+  if (!autoRefreshEnabled.value) return;
+  refreshTimer = window.setInterval(() => {
+    void loadData();
+  }, selectedInterval.value * 1000);
+}
+
+function onApplyFilters() {
+  void refreshData();
 }
 
 function openDetail(
@@ -339,13 +383,37 @@ function openDetail(
   showDetail.value = true;
 }
 onMounted(() => {
-  void refreshData();
+  void refreshData(true);
+  scheduleAutoRefresh();
+});
+
+onBeforeUnmount(() => {
+  clearAutoRefresh();
+});
+
+watch([autoRefreshEnabled, selectedInterval], () => {
+  scheduleAutoRefresh();
 });
 </script>
 
 <style scoped>
 .row--clickable {
   cursor: pointer;
+}
+
+.page-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.6rem;
+  background:
+    linear-gradient(to bottom, rgba(2, 6, 23, 0.95), rgba(2, 6, 23, 0.9)),
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.08), transparent 55%);
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.6);
 }
 
 .activity-toolbar {
@@ -360,11 +428,23 @@ onMounted(() => {
   background: rgba(15, 23, 42, 0.6);
 }
 
+.activity-toolbar--accent {
+  padding: 0.55rem 0.8rem;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.16), transparent 45%),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.95), rgba(11, 17, 29, 0.88));
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
 .activity-toolbar__group {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.activity-toolbar__group--compact {
+  gap: 0.45rem;
 }
 
 .activity-toolbar__label {

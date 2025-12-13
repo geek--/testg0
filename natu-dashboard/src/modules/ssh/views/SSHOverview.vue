@@ -581,6 +581,14 @@ watch(filterTerm, () => {
 watch([autoRefreshEnabled, selectedInterval], () => {
   scheduleAutoRefresh();
 });
+
+watch(filterTerm, () => {
+  page.value = 1;
+});
+
+watch([autoRefreshEnabled, selectedInterval], () => {
+  scheduleAutoRefresh();
+});
 </script>
 
 <style scoped>
@@ -647,6 +655,14 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   border-color: rgba(148, 163, 184, 0.35);
 }
 
+.activity-toolbar--accent {
+  padding: 0.55rem 0.8rem;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.16), transparent 45%),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.95), rgba(11, 17, 29, 0.88));
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
 .activity-toolbar__group {
   display: flex;
   align-items: center;
@@ -686,6 +702,59 @@ watch([autoRefreshEnabled, selectedInterval], () => {
   padding: 0.2rem 0.4rem;
   border-radius: 0.45rem;
   background: rgba(59, 130, 246, 0.12);
+}
+
+.filters-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: radial-gradient(
+      circle at top left,
+      rgba(56, 189, 248, 0.08),
+      transparent
+    ),
+    rgba(15, 23, 42, 0.9);
+}
+
+.filters-bar--compact {
+  margin-bottom: 0.65rem;
+}
+
+.filters-bar__group {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+
+.filters-bar__label {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-bottom: 0.25rem;
+}
+
+.filters-bar__input {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  color: #e5e7eb;
+}
+
+.filters-bar__input::placeholder {
+  color: #6b7280;
+}
+
+.filters-bar__actions {
+  margin-left: auto;
+}
+
+.filters-bar__hint {
+  font-size: 0.72rem;
+  color: #9ca3af;
 }
 
 .filters-bar {
